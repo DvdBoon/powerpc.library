@@ -1,0 +1,79 @@
+(compiler
+
+    (alias "vbcc/classic")
+
+    (makefile "makefiles/vbcc-classic/makefile")
+
+    (make "make -f %makefile %target")
+
+    (executable "bin/vbcc-classic/powerpctest.library")
+
+    (stack "262144")
+
+    (target "")
+
+    (options
+
+        "-cpu=68030"
+
+        "-sc"
+
+        "-cpp-comments"
+
+        "-c99"
+
+        "-Ivincludeos3:"
+
+        "-Iinclude_h:"
+
+        "-nostdlib"
+
+        "-dontwarn=363"
+
+        "-O2"
+
+        "-speed"
+
+        "-unroll-all"
+    )
+)
+
+(compiler
+
+    (alias "vbcc/classic")
+
+    (options
+
+        "+aos68k"
+
+        "-cpu=68040"
+
+        "-lm040"
+
+        "-sc"
+
+        "-sd"
+
+        "-cpp-comments"
+
+        "-c99"
+
+        "-dontkeep-initialized-data"
+
+        "-hunkdebug"
+
+        "-lauto"
+
+        "-lamiga"
+
+        "-nostdlib"
+
+        "-O3"
+
+        "-speed"
+
+        "-amiga-align"
+
+        "-sc"
+    )
+)
