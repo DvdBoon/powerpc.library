@@ -1069,6 +1069,27 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
         PowerPCBase->pp_SystemSegs[i] = getSRIn(i<<28);
     }
 
+    /*
+     * THE SAME SET AGAIN, AT PHYSICAL 0x2000, for the exception entry in
+     * kernel.s. PowerPCBase is a 68k-view address and the entry runs
+     * untranslated until it has installed a known MMU state, so the state it
+     * installs has to live where EA == PA: the low 2 MB under BAT0. Reached
+     * here translated through that same BAT. FIXES.md "THE MSR UNDER THE
+     * EXCEPTION PATH", 23 Oct 2026.
+     */
+    {
+        ULONG* libBATs = (ULONG*)MMU_ZERO_LIB_BATS;
+        ULONG* libSegs = (ULONG*)MMU_ZERO_LIB_SEGS;
+        ULONG* src     = (ULONG*)&PowerPCBase->pp_SystemBATs[0];
+
+        for (int i = 0; i < 16; i++)
+        {
+            libBATs[i] = src[i];
+            libSegs[i] = PowerPCBase->pp_SystemSegs[i];
+        }
+        *((ULONG*)MMU_ZERO_LIB_SDR1) = getSDR1();
+    }
+
     ULONG* cmem = (APTR)(PowerPCBase->pp_PPCMemBase + MEM_GAP - 0xC000);
     for (int i = 0; i < 0x1000; i++)
     {

@@ -44,6 +44,189 @@ _ExcCommon:
         mfsrr1  r0
         stw     r0,ZP_EXCSRR1(r0)                  #was mtsprg1; SPRG1 is clobbered by it
 
+#       THE INTERRUPTED TASK'S MMU STATE OUT, THE LIBRARY'S IN. Untranslated:
+#       the only free register is r0 (its value is in SPRG3), and CR, CTR and
+#       r3 are the task's, so they are parked in page 0x2000 around the SDR1
+#       compare. FIXES.md "THE MSR UNDER THE EXCEPTION PATH", 23 Oct 2026.
+#
+#       From the mtmsr below on, every fetch and every load goes through
+#       translation. The original never faces this: its exception path runs
+#       untranslated to the rfi (warp.p:3455-3458 sets only FP; powerpc.p has
+#       no mtmsr in the path), and on a CyberStorm EA == PA. Here the stack at
+#       0(r1), the frame, PowerPCBase and every handler are 68k-view
+#       addresses, EA = PA + id_MemBase, so translation is needed -- and it
+#       must be the LIBRARY'S. iFUSION enters its guest with every BAT upper
+#       zeroed, the guest's SDR1 live and N set in all sixteen segment
+#       registers (recon/ppc/mmuswitch.c:133-145, exchandlers.c:698); under
+#       that, this routine's own next instruction, at 0x3000 through BAT0,
+#       cannot be fetched, and the first exception in guest mode re-enters
+#       here for ever.
+#
+#       The task's sixteen BAT words, sixteen segment registers and SDR1 go
+#       to ZP_MMU_TASK_*, which _StoreFrame copies into the frame. The exit
+#       loads them back from the frame and installs them after switching
+#       translation off, so the task resumes under its own state.
+        mfibatu r0,0
+        stw     r0,ZP_MMU_TASK_BATS+0(r0)
+        mfibatl r0,0
+        stw     r0,ZP_MMU_TASK_BATS+4(r0)
+        mfdbatu r0,0
+        stw     r0,ZP_MMU_TASK_BATS+8(r0)
+        mfdbatl r0,0
+        stw     r0,ZP_MMU_TASK_BATS+12(r0)
+        mfibatu r0,1
+        stw     r0,ZP_MMU_TASK_BATS+16(r0)
+        mfibatl r0,1
+        stw     r0,ZP_MMU_TASK_BATS+20(r0)
+        mfdbatu r0,1
+        stw     r0,ZP_MMU_TASK_BATS+24(r0)
+        mfdbatl r0,1
+        stw     r0,ZP_MMU_TASK_BATS+28(r0)
+        mfibatu r0,2
+        stw     r0,ZP_MMU_TASK_BATS+32(r0)
+        mfibatl r0,2
+        stw     r0,ZP_MMU_TASK_BATS+36(r0)
+        mfdbatu r0,2
+        stw     r0,ZP_MMU_TASK_BATS+40(r0)
+        mfdbatl r0,2
+        stw     r0,ZP_MMU_TASK_BATS+44(r0)
+        mfibatu r0,3
+        stw     r0,ZP_MMU_TASK_BATS+48(r0)
+        mfibatl r0,3
+        stw     r0,ZP_MMU_TASK_BATS+52(r0)
+        mfdbatu r0,3
+        stw     r0,ZP_MMU_TASK_BATS+56(r0)
+        mfdbatl r0,3
+        stw     r0,ZP_MMU_TASK_BATS+60(r0)
+        mfsr    r0,0
+        stw     r0,ZP_MMU_TASK_SEGS+0(r0)
+        mfsr    r0,1
+        stw     r0,ZP_MMU_TASK_SEGS+4(r0)
+        mfsr    r0,2
+        stw     r0,ZP_MMU_TASK_SEGS+8(r0)
+        mfsr    r0,3
+        stw     r0,ZP_MMU_TASK_SEGS+12(r0)
+        mfsr    r0,4
+        stw     r0,ZP_MMU_TASK_SEGS+16(r0)
+        mfsr    r0,5
+        stw     r0,ZP_MMU_TASK_SEGS+20(r0)
+        mfsr    r0,6
+        stw     r0,ZP_MMU_TASK_SEGS+24(r0)
+        mfsr    r0,7
+        stw     r0,ZP_MMU_TASK_SEGS+28(r0)
+        mfsr    r0,8
+        stw     r0,ZP_MMU_TASK_SEGS+32(r0)
+        mfsr    r0,9
+        stw     r0,ZP_MMU_TASK_SEGS+36(r0)
+        mfsr    r0,10
+        stw     r0,ZP_MMU_TASK_SEGS+40(r0)
+        mfsr    r0,11
+        stw     r0,ZP_MMU_TASK_SEGS+44(r0)
+        mfsr    r0,12
+        stw     r0,ZP_MMU_TASK_SEGS+48(r0)
+        mfsr    r0,13
+        stw     r0,ZP_MMU_TASK_SEGS+52(r0)
+        mfsr    r0,14
+        stw     r0,ZP_MMU_TASK_SEGS+56(r0)
+        mfsr    r0,15
+        stw     r0,ZP_MMU_TASK_SEGS+60(r0)
+        mfsdr1  r0
+        stw     r0,ZP_MMU_TASK_SDR1(r0)
+        lwz     r0,ZP_MMU_LIB_BATS+0(r0)
+        mtibatu 0,r0
+        lwz     r0,ZP_MMU_LIB_BATS+4(r0)
+        mtibatl 0,r0
+        lwz     r0,ZP_MMU_LIB_BATS+8(r0)
+        mtdbatu 0,r0
+        lwz     r0,ZP_MMU_LIB_BATS+12(r0)
+        mtdbatl 0,r0
+        lwz     r0,ZP_MMU_LIB_BATS+16(r0)
+        mtibatu 1,r0
+        lwz     r0,ZP_MMU_LIB_BATS+20(r0)
+        mtibatl 1,r0
+        lwz     r0,ZP_MMU_LIB_BATS+24(r0)
+        mtdbatu 1,r0
+        lwz     r0,ZP_MMU_LIB_BATS+28(r0)
+        mtdbatl 1,r0
+        lwz     r0,ZP_MMU_LIB_BATS+32(r0)
+        mtibatu 2,r0
+        lwz     r0,ZP_MMU_LIB_BATS+36(r0)
+        mtibatl 2,r0
+        lwz     r0,ZP_MMU_LIB_BATS+40(r0)
+        mtdbatu 2,r0
+        lwz     r0,ZP_MMU_LIB_BATS+44(r0)
+        mtdbatl 2,r0
+        lwz     r0,ZP_MMU_LIB_BATS+48(r0)
+        mtibatu 3,r0
+        lwz     r0,ZP_MMU_LIB_BATS+52(r0)
+        mtibatl 3,r0
+        lwz     r0,ZP_MMU_LIB_BATS+56(r0)
+        mtdbatu 3,r0
+        lwz     r0,ZP_MMU_LIB_BATS+60(r0)
+        mtdbatl 3,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+0(r0)
+        mtsr    0,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+4(r0)
+        mtsr    1,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+8(r0)
+        mtsr    2,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+12(r0)
+        mtsr    3,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+16(r0)
+        mtsr    4,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+20(r0)
+        mtsr    5,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+24(r0)
+        mtsr    6,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+28(r0)
+        mtsr    7,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+32(r0)
+        mtsr    8,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+36(r0)
+        mtsr    9,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+40(r0)
+        mtsr    10,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+44(r0)
+        mtsr    11,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+48(r0)
+        mtsr    12,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+52(r0)
+        mtsr    13,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+56(r0)
+        mtsr    14,r0
+        lwz     r0,ZP_MMU_LIB_SEGS+60(r0)
+        mtsr    15,r0
+        isync
+
+#       SDR1 only when it differs, with the TLB flushed the way EnablePageTable
+#       does it (warp.p:1697-1704). A task on the library's table pays nothing.
+        mfcr    r0
+        stw     r0,ZP_MMU_SAVE_CR(r0)
+        stw     r3,ZP_MMU_SAVE_R3(r0)
+        lwz     r3,ZP_MMU_LIB_SDR1(r0)
+        lwz     r0,ZP_MMU_TASK_SDR1(r0)
+        cmpw    r0,r3
+        beq     .MMUInSame
+        mfctr   r0
+        stw     r0,ZP_MMU_SAVE_CTR(r0)
+        li      r0,64
+        mtctr   r0
+        li      r0,0
+.MMUInTLB:
+        tlbie   r0
+        addi    r0,r0,0x1000
+        bdnz    .MMUInTLB
+        sync
+        mtsdr1  r3
+        sync
+        isync
+        lwz     r0,ZP_MMU_SAVE_CTR(r0)
+        mtctr   r0
+.MMUInSame:
+        lwz     r3,ZP_MMU_SAVE_R3(r0)
+        lwz     r0,ZP_MMU_SAVE_CR(r0)
+        mtcr    r0
+
         mfmsr   r0
         ori     r0,r0,(PSL_IR|PSL_DR|PSL_FP)
         mtmsr   r0			                   #Reenable MMU
@@ -93,24 +276,158 @@ _ExcCommon:
         mr.     r31,r31
         bne     .NI2                                       #trash everything, is idle task.
 
+        li      r0,0                                       #idle: no task, so no tp_Table
+        stw     r0,ZP_MMU_EXIT_TABLE(r0)
         lwz     r31,PPCMEMHEADER(r0)
         subi    r31,r31,0x7000
         subi    r31,r31,0x5000                             #go to idle, don't care about registers
         b       .Idle
 
-.NI2:   lwz     r31,PPCTASK_CONTEXMEM(r31)
+.NI2:   lwz     r0,PPCTASK_TABLE(r31)                      #tp_Table: the task's page table, 0 = the library's
+        stw     r0,ZP_MMU_EXIT_TABLE(r0)
+        lwz     r31,PPCTASK_CONTEXMEM(r31)
 .Idle:  mr      r1,r31
 
         bl      _LoadFrame                   #LR, r0,r1 and r3 are skipped in this routine and are loaded below
 
         bl      _FlushICache
 
+#       THE TASK'S MMU STATE BACK, WITH TRANSLATION OFF. Everything the exit
+#       still needs from the frame -- CR, CTR, r0, r1, r3 -- is staged in page
+#       0x2000 first, because the frame is a 68k-view address and is out of
+#       reach once translation is off. _LoadFrame has already put the frame's
+#       sixteen BAT words, sixteen segment registers and SDR1 in ZP_MMU_TASK_*.
+#       The registers are then written while nothing translates through them,
+#       which is also why the original zeroes and reloads its BATs where it
+#       does (powerpc.p:5034-5084): with translation off, the order of the
+#       upper and lower words of a BAT pair cannot matter.
         lwz     r0,IF_CONTEXT_CR(r1)
-        mtcr    r0
-        lwz     r3,IF_CONTEXT_GPR+GPR3(r1)                 #GPR[3]
+        stw     r0,ZP_MMU_EXIT_CR(r0)
+        mfctr   r0
+        stw     r0,ZP_MMU_SAVE_CTR(r0)
+        lwz     r0,IF_CONTEXT_GPR+GPR3(r1)                 #GPR[3]
+        stw     r0,ZP_MMU_EXIT_R3(r0)
         lwz     r0,IF_CONTEXT_GPR+GPR0(r1)                 #GPR[0]
+        stw     r0,ZP_MMU_EXIT_R0(r0)
+        lwz     r0,IF_CONTEXT_GPR+GPR1(r1)                 #GPR[1]
+        stw     r0,ZP_MMU_EXIT_R1(r0)
+
+#       Which page table the task resumes under: tp_Table if it set one
+#       (tasksPPC.h:38; iFUSION writes it at 0x01F5D8 and 0x01FA88), else the
+#       SDR1 it was interrupted with, else the library's own. tp_Table is the
+#       bare HTABORG, so the HTABMASK is taken from the library's SDR1, as
+#       EnablePageTable derives it from PPC_TABLESIZE (powerpc.p:5015,
+#       warp.p:1688-1690).
+        lwz     r3,ZP_MMU_EXIT_TABLE(r0)
+        mr.     r3,r3
+        beq     .ExitNoTable
+        lwz     r0,ZP_MMU_LIB_SDR1(r0)
+        andi.   r0,r0,0x1ff
+        or      r3,r3,r0
+        b       .ExitSDR1
+.ExitNoTable:
+        lwz     r3,ZP_MMU_TASK_SDR1(r0)
+        mr.     r3,r3
+        bne     .ExitSDR1
+        lwz     r3,ZP_MMU_LIB_SDR1(r0)
+.ExitSDR1:
+        stw     r3,ZP_MMU_TASK_SDR1(r0)
+
+        mfmsr   r0
+        ori     r0,r0,(PSL_IR|PSL_DR)
+        xori    r0,r0,(PSL_IR|PSL_DR)                      #translation off, as warp.p:1692-1694
+        mtmsr   r0
+        isync
+
+        lwz     r0,ZP_MMU_TASK_BATS+0(r0)
+        mtibatu 0,r0
+        lwz     r0,ZP_MMU_TASK_BATS+4(r0)
+        mtibatl 0,r0
+        lwz     r0,ZP_MMU_TASK_BATS+8(r0)
+        mtdbatu 0,r0
+        lwz     r0,ZP_MMU_TASK_BATS+12(r0)
+        mtdbatl 0,r0
+        lwz     r0,ZP_MMU_TASK_BATS+16(r0)
+        mtibatu 1,r0
+        lwz     r0,ZP_MMU_TASK_BATS+20(r0)
+        mtibatl 1,r0
+        lwz     r0,ZP_MMU_TASK_BATS+24(r0)
+        mtdbatu 1,r0
+        lwz     r0,ZP_MMU_TASK_BATS+28(r0)
+        mtdbatl 1,r0
+        lwz     r0,ZP_MMU_TASK_BATS+32(r0)
+        mtibatu 2,r0
+        lwz     r0,ZP_MMU_TASK_BATS+36(r0)
+        mtibatl 2,r0
+        lwz     r0,ZP_MMU_TASK_BATS+40(r0)
+        mtdbatu 2,r0
+        lwz     r0,ZP_MMU_TASK_BATS+44(r0)
+        mtdbatl 2,r0
+        lwz     r0,ZP_MMU_TASK_BATS+48(r0)
+        mtibatu 3,r0
+        lwz     r0,ZP_MMU_TASK_BATS+52(r0)
+        mtibatl 3,r0
+        lwz     r0,ZP_MMU_TASK_BATS+56(r0)
+        mtdbatu 3,r0
+        lwz     r0,ZP_MMU_TASK_BATS+60(r0)
+        mtdbatl 3,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+0(r0)
+        mtsr    0,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+4(r0)
+        mtsr    1,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+8(r0)
+        mtsr    2,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+12(r0)
+        mtsr    3,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+16(r0)
+        mtsr    4,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+20(r0)
+        mtsr    5,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+24(r0)
+        mtsr    6,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+28(r0)
+        mtsr    7,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+32(r0)
+        mtsr    8,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+36(r0)
+        mtsr    9,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+40(r0)
+        mtsr    10,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+44(r0)
+        mtsr    11,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+48(r0)
+        mtsr    12,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+52(r0)
+        mtsr    13,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+56(r0)
+        mtsr    14,r0
+        lwz     r0,ZP_MMU_TASK_SEGS+60(r0)
+        mtsr    15,r0
+        isync
+
+        mfsdr1  r0
+        cmpw    r0,r3
+        beq     .ExitSame
+        li      r0,64
+        mtctr   r0
+        li      r0,0
+.ExitTLB:
+        tlbie   r0
+        addi    r0,r0,0x1000
+        bdnz    .ExitTLB
+        sync
+        mtsdr1  r3
+        sync
+        isync
+.ExitSame:
+        lwz     r0,ZP_MMU_SAVE_CTR(r0)
+        mtctr   r0
+        lwz     r0,ZP_MMU_EXIT_CR(r0)
+        mtcr    r0
+        lwz     r3,ZP_MMU_EXIT_R3(r0)
+        lwz     r0,ZP_MMU_EXIT_R0(r0)
         mtsprg2 r0
-        lwz     r1,IF_CONTEXT_GPR+GPR1(r1)                 #GPR[1]
+        lwz     r1,ZP_MMU_EXIT_R1(r0)
 
         lwz     r0,ZP_EXCSRR0(r0)                  #rA=0 is the literal zero
         mtsrr0  r0
@@ -290,71 +607,73 @@ _StoreFrame:
 		mfspr	r0,VRSAVE
 		stwu    r0,16(r3)
 
-.NoVMX: mfibatu r0,0
+.NoVMX: lwz     r0,ZP_MMU_TASK_BATS+0(r0)            #the task's, captured at entry
         stwu    r0,4(r3)
-        mfibatl r0,0
+        lwz     r0,ZP_MMU_TASK_BATS+4(r0)
         stwu    r0,4(r3)
-        mfdbatu r0,0
+        lwz     r0,ZP_MMU_TASK_BATS+8(r0)
         stwu    r0,4(r3)
-        mfdbatl r0,0
+        lwz     r0,ZP_MMU_TASK_BATS+12(r0)
         stwu    r0,4(r3)
-        mfibatu r0,1
+        lwz     r0,ZP_MMU_TASK_BATS+16(r0)
         stwu    r0,4(r3)
-        mfibatl r0,1
+        lwz     r0,ZP_MMU_TASK_BATS+20(r0)
         stwu    r0,4(r3)
-        mfdbatu r0,1
+        lwz     r0,ZP_MMU_TASK_BATS+24(r0)
         stwu    r0,4(r3)
-        mfdbatl r0,1
+        lwz     r0,ZP_MMU_TASK_BATS+28(r0)
         stwu    r0,4(r3)
-        mfibatu r0,2
+        lwz     r0,ZP_MMU_TASK_BATS+32(r0)
         stwu    r0,4(r3)
-        mfibatl r0,2
+        lwz     r0,ZP_MMU_TASK_BATS+36(r0)
         stwu    r0,4(r3)
-        mfdbatu r0,2
+        lwz     r0,ZP_MMU_TASK_BATS+40(r0)
         stwu    r0,4(r3)
-        mfdbatl r0,2
+        lwz     r0,ZP_MMU_TASK_BATS+44(r0)
         stwu    r0,4(r3)
-        mfibatu r0,3
+        lwz     r0,ZP_MMU_TASK_BATS+48(r0)
         stwu    r0,4(r3)
-        mfibatl r0,3
+        lwz     r0,ZP_MMU_TASK_BATS+52(r0)
         stwu    r0,4(r3)
-        mfdbatu r0,3
+        lwz     r0,ZP_MMU_TASK_BATS+56(r0)
         stwu    r0,4(r3)
-        mfdbatl r0,3
+        lwz     r0,ZP_MMU_TASK_BATS+60(r0)
         stwu    r0,4(r3)
 
-        mfsr    r0,0
+        lwz     r0,ZP_MMU_TASK_SEGS+0(r0)
         stwu    r0,4(r3)
-        mfsr    r0,1
+        lwz     r0,ZP_MMU_TASK_SEGS+4(r0)
         stwu    r0,4(r3)
-        mfsr    r0,2
+        lwz     r0,ZP_MMU_TASK_SEGS+8(r0)
         stwu    r0,4(r3)
-        mfsr    r0,3
+        lwz     r0,ZP_MMU_TASK_SEGS+12(r0)
         stwu    r0,4(r3)
-        mfsr    r0,4
+        lwz     r0,ZP_MMU_TASK_SEGS+16(r0)
         stwu    r0,4(r3)
-        mfsr    r0,5
+        lwz     r0,ZP_MMU_TASK_SEGS+20(r0)
         stwu    r0,4(r3)
-        mfsr    r0,6
+        lwz     r0,ZP_MMU_TASK_SEGS+24(r0)
         stwu    r0,4(r3)
-        mfsr    r0,7
+        lwz     r0,ZP_MMU_TASK_SEGS+28(r0)
         stwu    r0,4(r3)
-        mfsr    r0,8
+        lwz     r0,ZP_MMU_TASK_SEGS+32(r0)
         stwu    r0,4(r3)
-        mfsr    r0,9
+        lwz     r0,ZP_MMU_TASK_SEGS+36(r0)
         stwu    r0,4(r3)
-        mfsr    r0,10
+        lwz     r0,ZP_MMU_TASK_SEGS+40(r0)
         stwu    r0,4(r3)
-        mfsr    r0,11
+        lwz     r0,ZP_MMU_TASK_SEGS+44(r0)
         stwu    r0,4(r3)
-        mfsr    r0,12
+        lwz     r0,ZP_MMU_TASK_SEGS+48(r0)
         stwu    r0,4(r3)
-        mfsr    r0,13
+        lwz     r0,ZP_MMU_TASK_SEGS+52(r0)
         stwu    r0,4(r3)
-        mfsr    r0,14
+        lwz     r0,ZP_MMU_TASK_SEGS+56(r0)
         stwu    r0,4(r3)
-        mfsr    r0,15
+        lwz     r0,ZP_MMU_TASK_SEGS+60(r0)
         stwu    r0,4(r3)
+        lwz     r0,ZP_MMU_TASK_SDR1(r0)
+        stwu    r0,8(r3)                     #if_SDR1, past if_ExcNum
 
         blr
 
@@ -523,86 +842,72 @@ _LoadFrame:
 		mtspr	VRSAVE,r3
 
 .NoAV:  lwzu    r3,4(r31)
-        mtibatu 0,r3
+        stw     r3,ZP_MMU_TASK_BATS+0(r0)            #staged; the exit installs them untranslated
         lwzu    r3,4(r31)
-        mtibatl 0,r3
+        stw     r3,ZP_MMU_TASK_BATS+4(r0)
         lwzu    r3,4(r31)
-        mtdbatu 0,r3
+        stw     r3,ZP_MMU_TASK_BATS+8(r0)
         lwzu    r3,4(r31)
-        mtdbatl 0,r3
+        stw     r3,ZP_MMU_TASK_BATS+12(r0)
         lwzu    r3,4(r31)
-        mtibatu 1,r3
+        stw     r3,ZP_MMU_TASK_BATS+16(r0)
         lwzu    r3,4(r31)
-        mtibatl 1,r3
+        stw     r3,ZP_MMU_TASK_BATS+20(r0)
         lwzu    r3,4(r31)
-        mtdbatu 1,r3
+        stw     r3,ZP_MMU_TASK_BATS+24(r0)
         lwzu    r3,4(r31)
-        mtdbatl 1,r3
+        stw     r3,ZP_MMU_TASK_BATS+28(r0)
         lwzu    r3,4(r31)
-        mtibatu 2,r3
+        stw     r3,ZP_MMU_TASK_BATS+32(r0)
         lwzu    r3,4(r31)
-        mtibatl 2,r3
+        stw     r3,ZP_MMU_TASK_BATS+36(r0)
         lwzu    r3,4(r31)
-        mtdbatu 2,r3
+        stw     r3,ZP_MMU_TASK_BATS+40(r0)
         lwzu    r3,4(r31)
-        mtdbatl 2,r3
+        stw     r3,ZP_MMU_TASK_BATS+44(r0)
         lwzu    r3,4(r31)
-        mtibatu 3,r3
+        stw     r3,ZP_MMU_TASK_BATS+48(r0)
         lwzu    r3,4(r31)
-        mtibatl 3,r3
+        stw     r3,ZP_MMU_TASK_BATS+52(r0)
         lwzu    r3,4(r31)
-        mtdbatu 3,r3
+        stw     r3,ZP_MMU_TASK_BATS+56(r0)
         lwzu    r3,4(r31)
-        mtdbatl 3,r3
+        stw     r3,ZP_MMU_TASK_BATS+60(r0)
 
         lwzu    r3,4(r31)
-        mtsr    0,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+0(r0)
         lwzu    r3,4(r31)
-        mtsr    1,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+4(r0)
         lwzu    r3,4(r31)
-        mtsr    2,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+8(r0)
         lwzu    r3,4(r31)
-        mtsr    3,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+12(r0)
         lwzu    r3,4(r31)
-        mtsr    4,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+16(r0)
         lwzu    r3,4(r31)
-        mtsr    5,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+20(r0)
         lwzu    r3,4(r31)
-        mtsr    6,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+24(r0)
         lwzu    r3,4(r31)
-        mtsr    7,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+28(r0)
         lwzu    r3,4(r31)
-        mtsr    8,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+32(r0)
         lwzu    r3,4(r31)
-        mtsr    9,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+36(r0)
         lwzu    r3,4(r31)
-        mtsr    10,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+40(r0)
         lwzu    r3,4(r31)
-        mtsr    11,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+44(r0)
         lwzu    r3,4(r31)
-        mtsr    12,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+48(r0)
         lwzu    r3,4(r31)
-        mtsr    13,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+52(r0)
         lwzu    r3,4(r31)
-        mtsr    14,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+56(r0)
         lwzu    r3,4(r31)
-        mtsr    15,r3
-        isync
+        stw     r3,ZP_MMU_TASK_SEGS+60(r0)
+        lwzu    r3,8(r31)                    #if_SDR1, past if_ExcNum
+        stw     r3,ZP_MMU_TASK_SDR1(r0)
 
         mr      r31,r0
         blr

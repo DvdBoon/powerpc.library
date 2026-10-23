@@ -1430,6 +1430,7 @@ PPCKERNEL void DispatchPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
     {
         newFrame->if_Segments[i] = PowerPCBase->pp_SystemSegs[i];
     }
+    newFrame->if_SDR1 = 0;                  /* the library's table, kernel.s exit */
 
     return;
 }

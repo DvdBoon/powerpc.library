@@ -264,6 +264,17 @@
 #define OFFSET_PCIMEM           0x60000000
 #define VECTOR_TABLE_DEFAULT    0xfff00000
 
+/*
+ * The library's own MMU state at physical 0x2000, where the exception entry
+ * reads it UNTRANSLATED before it enables translation: sixteen BAT words in
+ * frame order, sixteen segment registers, SDR1. Filled once by setupppc.c;
+ * the rest of the page (the interrupted task's set, the exit's staging) is
+ * the kernel's alone. Keep in step with ZP_MMU_* in constantsppc.i.
+ */
+#define MMU_ZERO_LIB_BATS       0x2000
+#define MMU_ZERO_LIB_SEGS       0x2040
+#define MMU_ZERO_LIB_SDR1       0x2080
+
 //Bit defines for the L2CR register
 
 #define L2CR_L2E                0x80000000      /* bit 0 - enable */

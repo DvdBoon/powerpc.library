@@ -80,7 +80,8 @@
 .set IF_BATS,                   IF_VRSAVE+4
 .set IF_SEGMENTS,               IF_BATS+64
 .set IF_EXCNUM,                 IF_SEGMENTS+64
-.set IF_SIZE,                   IF_EXCNUM+4
+.set IF_SDR1,                   IF_EXCNUM+4       #the task's page table as SDR1; 0 = the library's
+.set IF_SIZE,                   IF_SDR1+4
 
 .set MS_MSAR1,                  0
 .set MS_MSAR2,                  4
@@ -210,9 +211,42 @@
 .set ZP_EXCSRR1,                0x2C
 .set ZP_EXCSCRATCH,             0x30
 
+# THE LIBRARY'S OWN MMU STATE, AND THE INTERRUPTED TASK'S, at physical 0x2000:
+# the free page between the last vector (0x1700, setupppc.s's table) and the
+# kernel at OFFSET_KERNEL 0x3000. Exception entry reads and writes it
+# UNTRANSLATED, before translation is enabled, and the exit writes the
+# registers from it after translation is switched off -- so, like ZP_*, every
+# access is rA=0 absolute and works with the MMU on or off (page zero and this
+# page are PA == EA both ways: BAT0 maps the low 2 MB one to one).
+#
+# The library's set is filled once by setupppc.c from pp_SystemBATs,
+# pp_SystemSegs and SDR1, and read at every exception entry. The task's set is
+# written at entry, copied into the frame by _StoreFrame, put back by
+# _LoadFrame and installed by the exit. FIXES.md "THE MSR UNDER THE EXCEPTION
+# PATH", 23 Oct 2026. Keep in step with MMU_ZERO_* in constants.h.
+.set ZP_MMU_LIB_BATS,           0x2000            #16 words: ibatu/ibatl/dbatu/dbatl 0..3, frame order
+.set ZP_MMU_LIB_SEGS,           0x2040            #16 words: SR0..SR15
+.set ZP_MMU_LIB_SDR1,           0x2080
+.set ZP_MMU_TASK_BATS,          0x2100            #the interrupted task's, same layout
+.set ZP_MMU_TASK_SEGS,          0x2140
+.set ZP_MMU_TASK_SDR1,          0x2180
+.set ZP_MMU_EXIT_TABLE,         0x2190            #tp_Table of the task being resumed, 0 for none
+.set ZP_MMU_EXIT_CR,            0x21A0            #CR, r0, r1, r3 staged for the untranslated exit
+.set ZP_MMU_EXIT_R0,            0x21A4
+.set ZP_MMU_EXIT_R1,            0x21A8
+.set ZP_MMU_EXIT_R3,            0x21AC
+.set ZP_MMU_SAVE_CR,            0x21B0            #parked across the entry's SDR1 compare
+.set ZP_MMU_SAVE_CTR,           0x21B4            #and across both tlbie loops
+.set ZP_MMU_SAVE_R3,            0x21B8
+
 .set POWERPCBASE,               0x10              #Align this number with the zp struct in libstructs.h
 .set POWERPCBASE_THISPPCTASK,   0x94              #debugdebug need to find to link this to libstruct.h
 .set PPCTASK_CONTEXMEM,         0x64
+# tp_Table, tasksPPC.h:38, under pack(2): Task 0x5C, then StackSize, StackMem,
+# ContextMem (0x64), TaskPtr, Flags, TaskLink (18 bytes: MinNode, APTR, ULONG,
+# UWORD, no tail padding), BATStorage 0x82, Core 0x86, TableLink 0x8A, Table
+# 0x92. Unaligned on purpose, and iFUSION stores to it as "stw r0,0x92(r5)".
+.set PPCTASK_TABLE,             0x92
 .set PPCMEMHEADER,              8
 
 .set HID0,                      1008

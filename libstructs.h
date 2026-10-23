@@ -329,6 +329,15 @@ ULONG                       if_VRSAVE;
 struct BATArray             if_BATs[4];
 ULONG                       if_Segments[16];
 ULONG                       if_ExcNum;
+/*
+ * The SDR1 the task was interrupted with, captured untranslated at exception
+ * entry with if_BATs and if_Segments, and installed again at exit with
+ * translation off. 0 means the library's own table, which is what a new task
+ * starts with; tp_Table, when a task sets it, takes precedence at exit.
+ * Appended, so IF_EXCNUM and everything above keep their offsets; IF_SDR1 and
+ * IF_SIZE in constantsppc.i follow it.
+ */
+ULONG                       if_SDR1;
 };
 
 struct poolHeader {

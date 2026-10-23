@@ -472,6 +472,7 @@ PPCFUNCTION struct TaskPPC* myCreateTaskPPC(__reg("r3") struct PrivatePPCBase* P
                                                 {
                                                     memFrame->if_Segments[i] = PowerPCBase->pp_SystemSegs[i];
                                                 }
+                                                memFrame->if_SDR1 = 0;      /* the library's table, kernel.s exit */
 
                                                 value = *((ULONG*)((ULONG)PowerPCBase + _LVOEndTask + 2));
 
