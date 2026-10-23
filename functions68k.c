@@ -28,6 +28,9 @@
 #include <exec/memory.h>
 #include <exec/tasks.h>
 #include <exec/ports.h>
+#include <dos/dos.h>
+#include <dos/dosextens.h>
+#include <proto/dos.h>
 #include <powerpc/powerpc.h>
 #include <powerpc/tasksPPC.h>
 
@@ -342,7 +345,24 @@ LIBFUNC68K LONG myWaitForPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __r
                 return (PPERR_ASYNCERR);
             }
 
-            ULONG andTemp = ~(0xfff + (1 << (ULONG)myMirror->mt_Port->mp_SigBit));
+            /*
+             * Bits 0-11 do NOT cross, in either direction. 0x010 / 0x100 /
+             * 0x400 are SIGF_SINGLE / SIGF_DOS / SIGF_WAIT, which are the
+             * PPC side's OWN bits -- SIGF_DOS is each PPC task's message
+             * port and SIGF_WAIT its WaitTime expiry -- so relaying them
+             * from here forges a port wake and a timer expiry. Sonnet masks
+             * both directions the same way: ~0xfff out of SigRecvd, low 12
+             * kept on whichever side received them (powerpc.s:3744,
+             * ppcfunctions.p:3663). An earlier revision of this file let
+             * 0x510 through; FIXES.md item 19 records why that was wrong.
+             *
+             * The "+" rather than "|" is the original's, powerpc.s:3732:
+             * "add.w #$fff,d6 / not.l d6" -- so a port bit below 12 carries
+             * instead of merging. Exec never allocates one there.
+             */
+            ULONG andTemp = ~(0xfff
+                              + (1 << (ULONG)myMirror->mt_Port->mp_SigBit));
+
 
             while (1)
             {
@@ -353,8 +373,46 @@ LIBFUNC68K LONG myWaitForPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __r
                         thisTask->tc_Node.ln_Pri = 0;
                     }
 
-                    Signals = Wait((ULONG)thisTask->tc_SigAlloc & 0xfffff000);
+                    /*  Only wait when the port is empty -- see the long note
+                    **  in support68k.c's copy of this loop. Wait has already
+                    **  cleared the port bit by the time it returns, so a
+                    **  queued frame must not depend on that bit surviving. */
+                    /*  The mask is the whole of tc_SigAlloc above bit 11, as
+                    **  the original's "move.l TC_SIGALLOC(a0),d0 / and.l
+                    **  #TOTALSIGNALS,d0" (powerpc.s:4059-4060): with the two
+                    **  masks kept identical by assignment (below), everything
+                    **  in it is a bit one side or the other allocated. */
+                    Signals = IsListEmpty((struct List*)
+                                          &myMirror->mt_Port->mp_MsgList)
+                                ? Wait((ULONG)thisTask->tc_SigAlloc & 0xfffff000)
+                                : (ULONG)(1 << (ULONG)myMirror->mt_Port->mp_SigBit);
 
+                    /*
+                     * THE "else" IS THE ORIGINAL'S OWN SHAPE -- do not
+                     * "fix" it again. FIXES.md item 19, 22 Oct 2026.
+                     *
+                     * I changed this to forward unconditionally, reasoning
+                     * that Wait() returns every pending signal at once so a
+                     * signal arriving together with a frame took the break
+                     * and its ID_LLPP was never sent. The reasoning about
+                     * Wait() is correct; the conclusion was not.
+                     *
+                     * powerpc.s:4053-4075 (Wait_PPC_common, WARPMODE) does
+                     * exactly this: "and.l d5,d0 / bne.w .run" takes the
+                     * frame branch when the rendezvous bit is present and
+                     * does NOT forward on that pass. The other signals are
+                     * not lost there either -- .nosyssig ends with
+                     * "not.l d5 / and.l d5,d1 / or.l d1,TC_SIGRECVD(a0)",
+                     * keeping them on the 68k task for the next crossing's
+                     * CallPPC to carry (:3971-3978). The line below,
+                     * "tc_SigRecvd |= (Signals & andTemp)", is our
+                     * equivalent of that.
+                     *
+                     * So forwarding early changes WHEN a signal arrives, not
+                     * WHETHER. It was tested on hardware and did not help,
+                     * and it is a divergence from the original with nothing
+                     * to show for it, so it is reverted.
+                     */
                     if (Signals & (1 << (ULONG)myMirror->mt_Port->mp_SigBit))
                     {
                         break;
@@ -373,6 +431,72 @@ LIBFUNC68K LONG myWaitForPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __r
                 {
                     if (myFrame->mf_Identifier == ID_T68K)
                     {
+                        /*
+                         * REMEMBER THE PPC TASK'S ALLOCATION TO WIDEN THE
+                         * WAIT -- AND DO NOT ASSIGN IT OVER OURS. FIXES.md
+                         * item 19.
+                         *
+                         * mf_Arg[0] carries the PPC task's tc_SigAlloc inbound
+                         * (myRun68K, functionsppc.c:79) and this handler used
+                         * to discard it. The wait at the top of this loop is
+                         * "tc_SigAlloc & 0xfffff000", so a bit the PPC task
+                         * allocated through AllocSignalPPC was never waited on
+                         * here: a 68k Signal() of that bit never woke the
+                         * mirror and was never forwarded to the PPC task.
+                         *
+                         * THE FIRST ATTEMPT AT THIS WROTE
+                         * "thisTask->tc_SigAlloc = myFrame->mf_Arg[0];",
+                         * copying the original's "move.l
+                         * XPP_SIGALLOC(a3),TC_SIGALLOC(a0)" (powerpc.s:3240,
+                         * :4082). IT BROKE ScummVM OUTRIGHT -- full screen
+                         * stopped opening at all -- because it overwrites the
+                         * MIRROR'S OWN allocations, including mt_Port's
+                         * mp_SigBit, so the mirror stops being woken for
+                         * frames.
+                         *
+                         * The original can afford the assignment because it
+                         * allocates THE SAME BIT NUMBER on both sides:
+                         * powerpc.s:3198-3211 reads CORE_SIGPPC's bit number
+                         * and calls AllocSignal with that number on the 68k
+                         * task, so copying the mask preserves the rendezvous
+                         * bit. This library uses different numbers on the two
+                         * sides -- SIGB_DOS hardcoded for the PPC task's frame
+                         * port, an allocated bit for the mirror's -- so the
+                         * copy destroys what it needs. That divergence is
+                         * recorded in item 19 and this is what makes it
+                         * load-bearing rather than cosmetic.
+                         *
+                         * So only the WAIT is widened, through a local. No
+                         * allocation state on either side is touched, and
+                         * nothing accumulates: a tc_SigAlloc OR would have
+                         * grown monotonically on both sides and started
+                         * refusing genuinely free bits in AllocSignal.
+                         */
+                        /*
+                         * ASSIGN, BOTH WAYS, EVERY CROSSING -- the documented
+                         * contract: "All signal allocations are kept coherent
+                         * on both CPU's" (powerpc.doc:940). The original
+                         * assigns the PPC mask over the 68k one here
+                         * (powerpc.s:4082) and the 68k mask over the PPC one
+                         * on the way back (powerpc.p:14975); Sonnet the same
+                         * (powerpc.s:2536, ppcfunctions.p:10334). Neither ORs.
+                         * An OR was tried for a day and ratcheted both masks
+                         * up to one union; independent masks were tried for
+                         * an evening and let the two sides allocate the same
+                         * bit number. Assignment propagates frees as well as
+                         * allocations.
+                         *
+                         * OR'd with our own port bit, because this library's
+                         * rendezvous bits differ -- SIGB_DOS on the PPC task,
+                         * an allocated bit here -- where the original uses
+                         * the same number on both sides (powerpc.s:3198-3211)
+                         * and so loses nothing by a plain copy. Without this
+                         * one bit, a PPC mask received before the first DONE
+                         * has carried ours back wipes it, which is what broke
+                         * ScummVM outright when "=" was first tried alone.
+                         */
+                        thisTask->tc_SigAlloc = myFrame->mf_Arg[0]
+                                              | (1 << (ULONG)myMirror->mt_Port->mp_SigBit);
                         thisTask->tc_SigRecvd |= myFrame->mf_Signals;
                         myMirror->mt_PPCTask = myFrame->mf_PPCTask;
 
@@ -383,11 +507,31 @@ LIBFUNC68K LONG myWaitForPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __r
                         CopyMemQuick((APTR)myFrame, (APTR)doneFrame, sizeof(struct MsgFrame));
 
                         doneFrame->mf_Identifier = ID_DONE;
-                        doneFrame->mf_Signals    = thisTask->tc_SigRecvd & andTemp;
+
+                        /*
+                         * FETCH AND CLEAR ATOMICALLY -- FIXES.md item 20.
+                         *
+                         * This was a capture, three unrelated stores, and
+                         * then "tc_SigRecvd ^= mf_Signals". exec can preempt
+                         * between the capture and the clear, and if the SAME
+                         * bit is signalled again in that window the xor
+                         * clears it as well: one copy travels in the frame
+                         * and the second is gone. Intermittent, needs signal
+                         * traffic to hit, and invisible afterwards -- which
+                         * is the shape of the fault being chased.
+                         *
+                         * The xor is also the wrong operator even without
+                         * preemption: it SETS any bit of mf_Signals that
+                         * tc_SigRecvd has lost in the meantime.
+                         *
+                         * SetSignal(0, mask) is exec's atomic fetch-and-
+                         * clear: it returns the old tc_SigRecvd and clears
+                         * the masked bits in one indivisible step.
+                         */
+                        doneFrame->mf_Signals    = SetSignal(0L, andTemp)
+                                                       & andTemp;
                         doneFrame->mf_Arg[0]     = (ULONG)thisTask;
                         doneFrame->mf_Arg[1]     = thisTask->tc_SigAlloc;
-
-                        thisTask->tc_SigRecvd ^= doneFrame->mf_Signals;
 
                         SendMsgFrame(PowerPCBase, doneFrame);
                         FreeMsgFrame(PowerPCBase, myFrame);

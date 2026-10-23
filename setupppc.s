@@ -22,6 +22,7 @@
 
 #*********************************************************
 
+.global     _GetNiceTable
 .global     _setupPPC, _Reset, _GetExcTable, _GetVecEntry
 .global     _getTableFX, _getTable100, _getTable66
 .global     _getL2Size, _detectMem
@@ -327,6 +328,53 @@ _VecEntry:
 .EndEntry:
 
 #*********************************************************
+
+#********************************************************************************************
+#
+# ULONG* GetNiceTable(void) -- the NICE weighting table, FIXES.md item 18.
+#
+# This is the original's NICETab, powerpc.p:17948, transcribed entry for entry.
+# Its own comment there gives the rule, "2^(NICE/(40/6)) << 24", and
+# ReSchedule indexes it at (nice + NICE_RANGE/2) * 4 -- so 41 entries for nice
+# -20..+20, and entry[i] = round(2^(i*6/40) * 2^24). Three were checked against
+# that formula before transcribing: entry[0] = 2^24 = 16777216, entry[20],
+# which is nice 0, = 2^27 = 134217728, and entry[40] = 2^30 = 1073741824.
+#
+# IN ASSEMBLER, because a static const array in setupppc.c will not link --
+# "Reference to undefined symbol _SDA_BASE_". Under -sc, C data is addressed
+# through the small-data area, and this library is linked -nostdlib with no
+# startup to establish one. Every table here is in assembler for that reason.
+#
+# AND IN THIS FILE RATHER THAN supportppc.s, which is what the init crash was.
+# supportppc.s assembles into the "functions" section and setupppc.c into
+# "setupppc"; those are separately loaded hunks at unrelated addresses, so a
+# direct bl between them lands wherever. Every real cross-section call in this
+# library goes through the LVO jump table instead -- kernel.c's RemHeadPPC
+# emits no _RemHeadPPC symbol at all, because proto/powerpc.h turns it into
+# "lwz r0,-LVO(r3) / mtlr r0 / blrl". A direct bl is only safe WITHIN a
+# section, which is why _GetExcTable and _GetVecEntry live here beside their
+# caller.
+#
+#********************************************************************************************
+
+_GetNiceTable:
+        mflr    r4
+        bl      .skipNice
+
+        .long   16777216,18615487,20655176,22918352,25429504
+        .long   28215802,31307392,34737726,38543921,42767158
+        .long   47453133,52652548,58421659,64822890,71925500
+        .long   79806339,88550677,98253128,109018671,120963790
+        .long   134217728,148923894,165241406,183346820,203436034
+        .long   225726413,250459137,277901812,308351367,342137263
+        .long   379625063,421220380,467373275,518583118,575403996
+        .long   638450708,708405415,786025023,872149370,967710316
+        .long   1073741824
+
+.skipNice:
+        mflr    r3
+        mtlr    r4
+        blr
 
 _GetExcTable:
         mflr    r4

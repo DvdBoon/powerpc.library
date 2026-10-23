@@ -118,6 +118,98 @@
 .set GPR3,                      3*4
 .set GPR4,                      4*4
 
+# struct Task's HOOK FIELDS, for FIXES.md item 10. Derived, not guessed:
+# struct Node is 14 bytes (ln_Succ 0, ln_Pred 4, ln_Type 8, ln_Pri 9,
+# ln_Name 10), so tc_Flags is 0x0E, and counting exec/tasks.h forward from
+# there -- tc_State 0x0F, tc_IDNestCnt 0x10, tc_TDNestCnt 0x11, tc_SigAlloc
+# 0x12, tc_SigWait 0x16, tc_SigRecvd 0x1A, tc_SigExcept 0x1E, tc_TrapAlloc
+# 0x22, tc_TrapAble 0x24, tc_ExceptData 0x26, tc_ExceptCode 0x2A, tc_TrapData
+# 0x2E, tc_TrapCode 0x32, tc_SPReg 0x36, tc_SPLower 0x3A, tc_SPUpper 0x3E --
+# puts tc_Switch at 0x42 and tc_Launch at 0x46.
+#
+# iFUSION'S OWN OFFSETS AGREE, INDEPENDENTLY: it writes 0x46(r3) at 0x01BF64 to
+# install its tc_Launch and reads 0x0E(r3) at 0x01F2F8 to clear TF_LAUNCH, with
+# r3 being FindTaskPPC(0)'s answer. And PPCTASK_CONTEXMEM = 0x64 below confirms
+# the prefix, since sizeof(struct Task) is 0x5C.
+# THE STRUCTURE A SMALLCONTEXT HANDLER RECEIVES, from WarpOS's own public
+# include warpos/include/powerpc/powerpc.i:233 --
+#
+#         STRUCTURE       XCONTEXT,0
+#         ULONG           XCO_EXCID       ;exception ID (see above)
+#         ULONG           XCO_R3          ;r3
+#         LABEL           XCO_SIZE        ;don't depend on this size
+#
+# kernel.s builds this by hand with raw stack offsets and has the two fields
+# the other way round: GPR[3] at +0 and the status at +4. iFUSION's exc_sc
+# reads 4(r3) for its 'HOST' magic -- 0x01E614 -- and so reads the status
+# slot, a word kernel.s does not write until after the handler returns. See
+# FIXES.md item 11; these two names exist so the fix can be read.
+.set XCO_EXCID,                 0
+.set XCO_R3,                    4
+
+# _SmallExcHandler's own 512-byte frame. The XCONTEXT it hands the handler is
+# built in it, and the handler's return status needs a slot that is NOT part of
+# the XCONTEXT -- it used to be written over XCO_R3.
+.set SEH_XCONTEXT,              300
+.set SEH_STATUS,                336
+
+.set PPCTASK_FLAGS,             0x0E
+.set PPCTASK_SWITCH,            0x42
+.set PPCTASK_LAUNCH,            0x46
+
+# exec/tasks.h's tc_Flags bits -- TB_SWITCH 6 and TB_LAUNCH 7, so 0x40 and
+# 0x80. FIXES.md item 10 is about these two.
+#
+# THE ORIGINAL CALLS THEM TP_SWITCH AND TP_LAUNCH, and that is not a different
+# pair of bits. powerpc.p:4740 and :5133 are "bittst r6,TP_SWITCH" and
+# "bittst r6,TP_LAUNCH" against TC_FLAGS, but NEITHER NAME IS DEFINED ANYWHERE
+# IN THE SOURCES WE HAVE, so the bit numbers cannot be read off the original.
+# Two pieces of evidence settle it:
+#
+#   - TP_ is a POWERPC BIT POSITION, counted from the MSB. WarpOS's own
+#     BITDEFPPC macro, warpos/include/powerpc/ppcmacros.i:8, emits all three
+#     spellings from one line:
+#         \1P_\2 = \3              ; PowerPC position, MSB = 0
+#         \1B_\2 = 31-(\3)         ; Amiga bit number
+#         \1F_\2 = 1<<(31-(\3))    ; mask
+#     and bittst at ppcmacros.i:373 is "extrwi. trash,\1,1,\2", which consumes
+#     the P_ form. tc_Flags is loaded with lbz, so the byte's bit 6 lands at
+#     PowerPC position 25 -- the same physical bit as exec's TF_SWITCH.
+#
+#     Neither TP_ name is in this repo because the exec includes are not:
+#     powerpc.p:74 includes exec/tasks.i and there is no warpos/exec/ at all.
+#     WarpOS built against PPC-flavoured copies using BITDEFPPC, which is why
+#     ppcmacros.i defines that macro while nothing here uses it. The NDK's own
+#     BITDEF yields TB_/TF_ only.
+#   - iFUSION, built against real WarpOS, clears the bit at 0x01F2F8:
+#         lbz  r4,0xe(r3)     ; tc_Flags
+#         li   r5,0x80
+#         andc r4,r4,r5
+#         stb  r4,0xe(r3)
+#     0x80 is exec's TF_LAUNCH. So TP_LAUNCH is position 7, and TP_SWITCH is
+#     position 6 by the same token -- exec reserves exactly those two bits for
+#     exactly this purpose.
+.set TF_SWITCH,                 0x40
+.set TF_LAUNCH,                 0x80
+
+# ABSOLUTE PAGE-ZERO SLOTS. The base field of a PPC load/store encodes rA=0
+# as the LITERAL zero, not as GPR0, so "lwz r0,ZP_EXCSRR0(r0)" is an absolute
+# access and works whatever r0 holds and whether the MMU is on or off. That is
+# the same idiom as the 0x24(r0) decrementer counter below.
+#
+# ZP_EXCSRR0/ZP_EXCSRR1 replace SPRG0/SPRG1 as the staging slots for SRR0 and
+# SRR1 across exception entry and exit. SPRG0 and SPRG1 cannot be used for it:
+# iFUSION's guest exception trampoline at h2:0x0058 does "mfspr r1,SPRG0" and
+# "mtspr SPRG1,r1", so it reads SPRG0 expecting a usable pointer and destroys
+# SPRG1. Under real WarpOS SPRG0 is a persistent pointer set once at HAL init
+# (warp.p:170-172) and exception entry never writes it.
+#
+# ZP_EXCSCRATCH is the eight words SPRG0 now points at -- iFUSION needs four,
+# written at 0(r1)..12(r1). warp.p:170 reserves 32 bytes the same way.
+.set ZP_EXCSRR0,                0x28
+.set ZP_EXCSRR1,                0x2C
+.set ZP_EXCSCRATCH,             0x30
+
 .set POWERPCBASE,               0x10              #Align this number with the zp struct in libstructs.h
 .set POWERPCBASE_THISPPCTASK,   0x94              #debugdebug need to find to link this to libstruct.h
 .set PPCTASK_CONTEXMEM,         0x64

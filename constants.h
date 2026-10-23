@@ -70,6 +70,34 @@
 #define QUANTUM_100             500000
 #define QUANTUM_66              333333
 
+/*
+ * The V14 proportional-share scheduler's constants, from powerpc.p:25-39.
+ * FIXES.md item 18.
+ */
+#define NICE_RANGE              40          /* -20 .. 20, powerpc.p:25     */
+#define PRI_OFFSET              2000        /* :27                         */
+#define PRI_MAXDIST             6000        /* -> pp_LowActivityPriOffset  */
+
+/*
+ * MIN_TICKS and RESCH_DEFAULT are the original's, kept for reference and
+ * DELIBERATELY NOT USED. They are raw tick counts and the decrementer runs at
+ * bus/4, so their comments hold only for the 66 MHz Phase5 bus WarpOS ran on:
+ * 6.00 ms and 1.50 ms there, but 4.00 and 1.00 at 100 MHz, and 1.50 and 0.38
+ * on an E300. kernel.c scales from pp_StdQuantum instead, which this library
+ * already normalises to exactly 20 ms on all three bus clocks.
+ */
+#define MIN_TICKS               25000       /* ~1.5 ms at 66 MHz, :26      */
+#define RESCH_DEFAULT           100000      /* ~6 ms at 66 MHz, :22        */
+
+/*
+ * MINDEC IS USED, AND TAKEN RAW -- unlike the two above. They are durations
+ * the scheduling behaviour depends on, so item 18 had to rescale them by bus
+ * clock; this is only a floor against programming the decrementer with a value
+ * that fires instantly. 100 ticks at bus/4 is 6 us on a 66 MHz bus and 4 us on
+ * a 100 MHz one, and nothing depends on which. powerpc.p:31, applied at :5308.
+ */
+#define MINDEC                  100         /* :31                         */
+
 #define PPERR_MISCERR           3
 
 #define CPUF_7410               0x00800000
@@ -79,6 +107,10 @@
 
 #define SIGF_WAIT               1<<10
 #define SYS_SIGALLOC            0x0000FFFF
+
+/* powerpc.p:32 "DEVIATION = 100". The timer sweep treats a deadline within
+ * this many timebase ticks as reached (powerpc.p:4131). */
+#define DEVIATION               100
 
 #define NT_XMSG68K              102
 #define NT_XMSGPPC              103

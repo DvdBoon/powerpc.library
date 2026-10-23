@@ -765,6 +765,7 @@ FUNC68K void MirrorTask(void)
 	struct ExecBase* SysBase = PowerPCBase->pp_PowerPCBase.PPC_SysLib;
 	struct MsgFrame* myFrame;
     struct MsgPort* mirrorPort;
+    struct MirrorTask* myMirror = NULL;
 
     struct Task* myTask = SysBase->ThisTask;
 
@@ -785,12 +786,81 @@ FUNC68K void MirrorTask(void)
         PutMsg(mirrorPort, (struct Message*)myFrame);
     }
 
+    /*
+     * REGISTER THE PAIRING IN pp_MirrorList -- FIXES.md item 19.
+     *
+     * A grep of lib/ for pp_MirrorList finds one AddHead, in functions68k.c's
+     * RunPPC at :218, which registers the 68k process that CALLED it. A
+     * mirror spawned here by MasterControl for a self-started PPC task got
+     * its pointers written on the PPC task (functionsppc.c:166-167 and
+     * kernel.c:1265-1266) and no list entry, so the pairing was recorded in
+     * one direction only.
+     *
+     * The 22 Oct sigstate log shows it directly: "SDL subtask" with
+     * pt_Mirror68K=08e51058 and pt_MirrorPort=08c2eb18, its mirror running as
+     * "SDL subtask_68K" -- and a pp_MirrorList holding one entry, for
+     * ScummVM. Three places walk that list to resolve a task and none could
+     * see this mirror: RunPPC at functions68k.c:181, which would build a
+     * SECOND entry for the same task; the PPF_ASYNC check at :332; and the
+     * cleanup at support68k.c:335, which sends ID_END to the PPC partner and
+     * deletes the port when a mirror dies.
+     *
+     * HERE is the place, not MasterControl: the port is created by the
+     * CreateMsgPort above, and the PPC task becomes known only when the first
+     * frame arrives with the CTRL_F. Both are in hand at this point.
+     *
+     * This makes RunPPC from inside a mirror REUSE the entry rather than
+     * duplicate it: functions68k.c:184 breaks out on a match with nxtMirror
+     * non-NULL, which skips the creation block and uses the entry found. It
+     * returns PPERR_ASYNCERR only for an entry marked PPF_ASYNC, and AllocVec
+     * with MEMF_CLEAR leaves mt_Flags zero.
+     */
+    if (myMirror = (struct MirrorTask*)AllocVec(sizeof(struct MirrorTask),
+                                                (MEMF_PUBLIC | MEMF_CLEAR)))
+    {
+        myMirror->mt_Task    = myTask;
+        myMirror->mt_Port    = mirrorPort;
+        myMirror->mt_PPCTask = myFrame ? myFrame->mf_PPCTask : NULL;
+
+        Disable();
+
+        AddHead((struct List*)&PowerPCBase->pp_MirrorList,
+                (struct Node*)myMirror);
+
+        Enable();
+    }
+
+    /* bits 0-11 do not cross; 0x010/0x100/0x400 are the PPC side's own
+     * SIGF_SINGLE/SIGF_DOS/SIGF_WAIT. The reasoning, and the "+", are in
+     * functions68k.c's copy of this expression */
     ULONG andTemp = ~(0xfff + (1 << (ULONG)mirrorPort->mp_SigBit));
+
 
     while (1)
     {
-        mySignal = Wait((ULONG)myTask->tc_SigAlloc & 0xfffff000);
+        /*  ONLY WAIT WHEN THE PORT IS EMPTY.
+        **
+        **  exec's Wait clears the bits it returns, so the port bit is gone
+        **  before the first GetMsg below. That is safe on its own, because
+        **  PutMsg's Signal sets the bit wherever this task happens to be --
+        **  a message arriving during or after the drain re-sets it and the
+        **  next Wait returns at once. It costs a spurious wake, never a
+        **  lost message, PROVIDED nothing else on this task ever clears the
+        **  bit. A sigdump snapshot of a ScummVM full screen stall shows the
+        **  state that violates it: mirrorport queued=1, task in WAIT, port
+        **  bit clear. Testing the list makes the loop independent of the
+        **  signal, so a queued frame is serviced whatever happened to the
+        **  bit. */
+        mySignal = IsListEmpty((struct List*)&mirrorPort->mp_MsgList)
+                     ? Wait((ULONG)myTask->tc_SigAlloc & 0xfffff000)
+                     : (ULONG)(1 << (ULONG)mirrorPort->mp_SigBit);
 
+        /* THE "else" BELOW IS THE ORIGINAL'S OWN SHAPE -- see the long note
+         * in functions68k.c's identical loop. Forwarding unconditionally was
+         * tried on 22 Oct and reverted: powerpc.s:4053-4075 takes the frame
+         * branch the same way and keeps the other signals on the 68k task
+         * for the next crossing, so the change moved WHEN a signal arrives,
+         * not WHETHER, and it did not help on hardware. */
         if (mySignal & (1 << (ULONG)mirrorPort->mp_SigBit))
         {
             myTask->tc_SigRecvd |= (mySignal & andTemp);
@@ -798,6 +868,21 @@ FUNC68K void MirrorTask(void)
             {
             if (myFrame->mf_Identifier == ID_T68K)
             {
+                /*
+                 * WIDEN THE WAIT WITH THE PPC TASK'S ALLOCATION, the same
+                 * change as functions68k.c's ID_T68K handler -- FIXES.md item
+                 * 19, and the comment there carries the full reasoning,
+                 * including why ASSIGNING this over tc_SigAlloc (as the
+                 * original does at powerpc.s:3240) broke ScummVM outright
+                 * here: it destroys the mirror's own mp_SigBit allocation,
+                 * which the original never risks because it gives both sides
+                 * the same bit number.
+                 */
+                /* assign, both ways, every crossing, keeping our own port
+                 * bit -- the reasoning and the citations are in
+                 * functions68k.c's copy of this handler */
+                myTask->tc_SigAlloc = myFrame->mf_Arg[0]
+                                    | (1 << (ULONG)mirrorPort->mp_SigBit);
                 myTask->tc_SigRecvd |= myFrame->mf_Signals;
                 myFrame->mf_MirrorPort = mirrorPort;
 
@@ -808,11 +893,14 @@ FUNC68K void MirrorTask(void)
                 CopyMemQuick((APTR)myFrame, (APTR)doneFrame, sizeof(struct MsgFrame));
 
                 doneFrame->mf_Identifier = ID_DONE;
-                doneFrame->mf_Signals    = myTask->tc_SigRecvd & andTemp;
+
+                /* atomic fetch-and-clear -- FIXES.md item 20, the same race
+                 * as functions68k.c's ID_T68K handler, which carries the
+                 * reasoning. A signal arriving between the capture and the
+                 * clear was discarded by the xor. */
+                doneFrame->mf_Signals    = SetSignal(0L, andTemp) & andTemp;
                 doneFrame->mf_Arg[0]     = (ULONG)myTask;
                 doneFrame->mf_Arg[1]     = myTask->tc_SigAlloc;
-
-                myTask->tc_SigRecvd ^= doneFrame->mf_Signals;
 
                 SendMsgFrame(PowerPCBase, doneFrame);
                 FreeMsgFrame(PowerPCBase, myFrame);
@@ -820,6 +908,18 @@ FUNC68K void MirrorTask(void)
             else if (myFrame->mf_Identifier == ID_END)
             {
                 FreeMsgFrame(PowerPCBase, myFrame);
+
+                /* take the entry registered above back out, so the list
+                 * holds only live mirrors. The port is left alone: this
+                 * function never deleted it, and changing that is a separate
+                 * question from registering the pairing. */
+                if (myMirror)
+                {
+                    Disable();
+                    Remove((struct Node*)myMirror);
+                    Enable();
+                    FreeVec(myMirror);
+                }
                 return;
             }
             else
@@ -929,7 +1029,52 @@ FUNC68K void MasterControl(void)
 							break;
 						}
 						myProc->pr_Task.tc_UserData = (APTR)myFrame;
-						myProc->pr_Task.tc_SigAlloc = myFrame->mf_Arg[0];
+						/*
+						 * OR, NEVER ASSIGN -- FIXES.md item 19, and this was
+						 * a RACE that hung a self-started PPC task.
+						 *
+						 * This was "=". MirrorTask calls CreateMsgPort()
+						 * BEFORE it waits for the CTRL_F below, and
+						 * CreateMsgPort AllocSignal()s a bit on that very
+						 * Process. mf_Arg[0] is the PPC task's tc_SigAlloc,
+						 * which for a CreateTaskPPC task is SYS_SIGALLOC =
+						 * 0x0000FFFF (functionsppc.c:512). So when the
+						 * assignment landed AFTER CreateMsgPort it wiped the
+						 * port's own bit out of the mask -- and MirrorTask's
+						 * loop waits on "tc_SigAlloc & 0xfffff000", which
+						 * then evaluates to ZERO. Wait(0) blocks for ever,
+						 * with the first frame already sitting on the port,
+						 * so the PPC task's Run68K never returned.
+						 *
+						 * Landing BEFORE CreateMsgPort is harmless, because
+						 * the bit is then allocated against the new mask and
+						 * is present. That is the whole race, and it is why
+						 * anything which perturbs the timing -- IDCMP traffic
+						 * in windowed mode, or a disk write -- made the
+						 * symptom disappear.
+						 *
+						 * ONLY THIS PATH IS AFFECTED, which matches where the
+						 * user localised it: MasterControl's ID_T68K runs
+						 * only for a PPC task that started itself and needs a
+						 * 68k mirror made on demand. In the ordinary
+						 * direction, a 68k program calling RunPPC, the mirror
+						 * already exists and this code is never reached.
+						 *
+						 * The OR keeps both sides' allocations, which is what
+						 * was intended: the mirror must know the bits the PPC
+						 * task reserved, without forgetting its own. The same
+						 * mistake, assigning over a task's own tc_SigAlloc,
+						 * broke ScummVM outright when I made it in the
+						 * ID_T68K handlers -- see the comment in
+						 * functions68k.c.
+						 *
+						 * THIS ONE STAYS. It runs once, before the new mirror
+						 * has waited on anything: a seed, the 68k twin of the
+						 * "tc_SigAlloc = mf_Arg[1]" that kernel.c gives a new
+						 * PPC task. The per-crossing merges that made the two
+						 * masks ratchet up to one union are the ones removed.
+						 */
+						myProc->pr_Task.tc_SigAlloc |= myFrame->mf_Arg[0];
 						Signal((struct Task*)myProc, SIGBREAKF_CTRL_F);
 						break;
 					}
@@ -1156,8 +1301,12 @@ FUNC68K ULONG GortInt(__reg("a1") APTR data, __reg("a5") APTR code)
 					{
 						if (myFrame->mf_Identifier != ID_END)
                         {
+                            /* assign, keeping the mirror's port bit -- as
+                             * Sonnet's MsgT68k does from the same place,
+                             * powerpc.s:2536; see functions68k.c */
                             struct Task* sigTask = mirrorPort->mp_SigTask;
-						    sigTask->tc_SigAlloc = myFrame->mf_Arg[0];
+						    sigTask->tc_SigAlloc = myFrame->mf_Arg[0]
+                                                 | (1 << (ULONG)mirrorPort->mp_SigBit);
 						}
                         PutMsg(mirrorPort, &myFrame->mf_Message);
                     }
@@ -1170,8 +1319,11 @@ FUNC68K ULONG GortInt(__reg("a1") APTR data, __reg("a5") APTR code)
 				case ID_FPPC:
 				{
                     struct MsgPort* replyPort = myFrame->mf_Message.mn_ReplyPort;
+					/* assign, keeping the caller's port bit -- Sonnet's
+					 * MsgFPPC, powerpc.s:2546 */
 					struct Task* sigTask = replyPort->mp_SigTask;
-					sigTask->tc_SigAlloc = myFrame->mf_Arg[0];
+					sigTask->tc_SigAlloc = myFrame->mf_Arg[0]
+					                     | (1 << (ULONG)replyPort->mp_SigBit);
 					ReplyMsg(&myFrame->mf_Message);
 					break;
 				}

@@ -550,7 +550,50 @@ PPCFUNCTION struct TaskPPC* myCreateTaskPPC(__reg("r3") struct PrivatePPCBase* P
 
                                                                 newTask->tp_Quantum = PowerPCBase->pp_StdQuantum;
                                                                 newTask->tp_Task.tc_State = TS_READY;
-                                                                newTask->tp_Desired = 0; //from NICE table TBI
+                                                                /*
+                                                                 * tp_Desired IS COMPUTED HERE, NOT LEFT TO CPUStats,
+                                                                 * powerpc.p:9329-9337 inside IFNE NEWSCHEDULER:
+                                                                 *
+                                                                 *     lwz   r7,TASKPPC_NICE(r31)
+                                                                 *     addi  r8,r7,NICE_RANGE/2
+                                                                 *     slwi  r8,r8,2
+                                                                 *     lwz   r7,PPC_NICETAB(r23)
+                                                                 *     lwzx  r8,r7,r8
+                                                                 *     srwi  r8,r8,8
+                                                                 *     liw   r7,PRI_OFFSET*65536
+                                                                 *     divwu r0,r7,r8
+                                                                 *     stw   r0,TASKPPC_DESIRED(r31)
+                                                                 *
+                                                                 * which is CPUStats' formula with activity 0, since a
+                                                                 * task that has never run has no activity to measure.
+                                                                 *
+                                                                 * This said "= 0; //CPUStats computes it from the NICE
+                                                                 * table" and that mattered as soon as the V14 rule went
+                                                                 * in: priDecay declines to judge a task whose tp_Desired
+                                                                 * is zero -- it cannot, the quotient would be a division
+                                                                 * by zero -- so a new task took NO penalty until the
+                                                                 * first CPUStats pass, and a nice +19 task created and
+                                                                 * run inside that window was scheduled as nice 0.
+                                                                 *
+                                                                 * tp_Nice is already clamped to -20..20 above, so the
+                                                                 * index is 0..40 and in range. The table is read through
+                                                                 * pp_NICETable rather than by calling GetNiceTable: that
+                                                                 * lives in the SETUP hunk and this is the FUNCTIONS
+                                                                 * hunk, and a direct call between them would land where
+                                                                 * the callee used to be.
+                                                                 */
+                                                                newTask->tp_Desired = 0;
+
+                                                                if (PowerPCBase->pp_NICETable)
+                                                                {
+                                                                    const ULONG* niceTab = (const ULONG*)PowerPCBase->pp_NICETable;
+                                                                    ULONG weight = niceTab[(LONG)newTask->tp_Nice + (NICE_RANGE / 2)] >> 8;
+
+                                                                    if (weight)
+                                                                    {
+                                                                        newTask->tp_Desired = (PRI_OFFSET << 16) / weight;
+                                                                    }
+                                                                }
                                                                 newTask->tp_Flags |= TASKPPCF_CREATORPPC;
 
                                                                 InsertOnPri(PowerPCBase, (struct List*)&PowerPCBase->pp_ReadyTasks, newTask);
@@ -1500,9 +1543,36 @@ PPCFUNCTION VOID mySignalPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
     args.db_Arg[0] = signals;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
+    /*
+     * EVERYTHING THAT IS NOT A PPC TASK GOES TO THE 68K SIDE, and this was
+     * "case NT_TASK:" -- FIXES.md item 19 gap 1.
+     *
+     * With only NT_TASK and NT_PPCTASK handled and no default, a target of any
+     * other type fell out of the switch and the signal was dropped in
+     * SILENCE. NT_PROCESS is 13 (exec/nodes.h:56) and **most 68k programs are
+     * Processes, not Tasks** -- anything started from the shell or Workbench
+     * -- so SignalPPC to one of those did nothing at all.
+     *
+     * The original is structured as the negation and therefore has no such
+     * hole: powerpc.p:10730 tests "ln_Type != NT_PPCTASK" and sends everything
+     * else down one path. This reproduces that shape.
+     *
+     * A default cannot misroute a PPC task: both creation paths set
+     * NT_PPCTASK, at functionsppc.c:360 and kernel.c:1241, so the only way to
+     * reach here is a genuinely non-PPC node.
+     *
+     * WHAT IT DOES WITH IT IS OURS, NOT THE ORIGINAL'S, deliberately. The
+     * original translates a 68k task to its PPC partner
+     * (FindPPCCoreEntryM -> CORE_PROCPPC) and signals that, because the task
+     * it is handed is expected to be a mirror. This library has no such
+     * lookup yet -- that is item 19 gap 2, and pp_MirrorList already holds the
+     * data for it -- so the signal is DELIVERED to the 68k task through
+     * mySignal68K, which is what this switch already did for NT_TASK and is
+     * the only sensible action for a 68k task that is not a mirror.
+     */
     switch (task->tp_Task.tc_Node.ln_Type)
     {
-        case NT_TASK:
+        default:
         {
             mySignal68K(PowerPCBase, (struct Task*)task, signals);
             break;
@@ -1751,7 +1821,7 @@ PPCFUNCTION APTR mySetExcHandler(__reg("r3") struct PrivatePPCBase* PowerPCBase,
     excInfo->ei_ExcData.ed_Node.ln_Name = (APTR)myGetTagDataPPC(PowerPCBase, EXCATTR_NAME, 0, taglist);
     excInfo->ei_ExcData.ed_Node.ln_Pri = (BYTE)myGetTagDataPPC(PowerPCBase, EXCATTR_PRI, 0, taglist);
     excInfo->ei_ExcData.ed_Node.ln_Type = NT_INTERRUPT;
-    excInfo->ei_ExcData.ed_RemovalTime = myGetTagDataPPC(PowerPCBase, EXCATTR_TIMEDREMOVAL, 0, taglist);
+    excInfo->ei_ExcData.ed_TimeBasePtr = (APTR)myGetTagDataPPC(PowerPCBase, EXCATTR_TIMEDREMOVAL, 0, taglist);
     value = myGetTagDataPPC(PowerPCBase, EXCATTR_EXCID, 0, taglist);
     excInfo->ei_ExcData.ed_ExcID = value;
 
@@ -2148,7 +2218,26 @@ PPCFUNCTION ULONG myWaitTime(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
 
     myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemWaitList);
 
-    PowerPCBase->pp_FlagWait = -1;
+    /*
+     * A PLAIN FLAG, AS THE ORIGINAL HAS IT: powerpc.p:11739 "stbi -1" here,
+     * :11779 "stbi 0" after the ADDHEAD, :11787 "stbi -1" after WaitPPC
+     * returns, :11802 "stbi 0" after PERMIT, read by the sweep at :4098.
+     *
+     * A NESTING COUNT WAS TRIED ON 22 OCT AND REVERTED. The argument for it
+     * was that with two tasks inside WaitTime one task's store of 0 clears
+     * the other's guard -- which is true, and still true. But the original
+     * is identical, so it is a divergence rather than a repair.
+     *
+     * IT WAS REVERTED ON A FALSE NEGATIVE AND IS BACK. I reported that it
+     * "changed nothing on hardware" -- but the run it was tested against was
+     * tests/subdemo, not ScummVM: I had just shipped the build and asked for
+     * subdemo, and the symptom reported was the whole Workbench and the mouse
+     * dying, which is subdemo's signature, not ScummVM's (that locks the
+     * screen and leaves the mouse alive). So the count was never tested
+     * against the real hang, and I reverted it on the strength of a different
+     * program's failure.
+     */
+    PowerPCBase->pp_FlagWait++;
 
     value2 = 60000000;
 
@@ -2181,15 +2270,18 @@ PPCFUNCTION ULONG myWaitTime(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
 
     myAddHeadPPC(PowerPCBase, (struct List*)&PowerPCBase->pp_WaitTime, (struct Node*)&myWait);
 
-    PowerPCBase->pp_FlagWait = 0;
+    PowerPCBase->pp_FlagWait--;
 
     myReleaseSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemWaitList);
 
     recvdsig = myWaitPPC(PowerPCBase, signals | SIGF_WAIT);
 
-    PowerPCBase->pp_FlagWait = -1;
-
     while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
+
+    /* inside the mutex: these two are not serialised by pp_SemWaitList the
+     * way the pair above is, and a lost decrement would disable the sweep
+     * permanently -- the very symptom being chased */
+    PowerPCBase->pp_FlagWait++;
 
     if (!((PowerPCBase->pp_ThisPPCProc->tp_Task.tc_SigRecvd | recvdsig) & SIGF_WAIT))
     {
@@ -2200,9 +2292,9 @@ PPCFUNCTION ULONG myWaitTime(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
         PowerPCBase->pp_ThisPPCProc->tp_Task.tc_SigRecvd &= ~SIGF_WAIT;
     }
 
-    FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
+    PowerPCBase->pp_FlagWait--;
 
-    PowerPCBase->pp_FlagWait = 0;
+    FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
 
     recvdsig &= ~SIGF_WAIT;
 

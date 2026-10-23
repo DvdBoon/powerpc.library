@@ -40,9 +40,9 @@ _ExcCommon:
         mtsprg2 r0                                         #LR; sprg3 = r0
 
         mfsrr0  r0
-        mtsprg0 r0
+        stw     r0,ZP_EXCSRR0(r0)                  #was mtsprg0; SPRG0 is iFUSION's
         mfsrr1  r0
-        mtsprg1 r0
+        stw     r0,ZP_EXCSRR1(r0)                  #was mtsprg1; SPRG1 is clobbered by it
 
         mfmsr   r0
         ori     r0,r0,(PSL_IR|PSL_DR|PSL_FP)
@@ -112,9 +112,9 @@ _ExcCommon:
         mtsprg2 r0
         lwz     r1,IF_CONTEXT_GPR+GPR1(r1)                 #GPR[1]
 
-        mfsprg0 r0
+        lwz     r0,ZP_EXCSRR0(r0)                  #rA=0 is the literal zero
         mtsrr0  r0
-        mfsprg1 r0
+        lwz     r0,ZP_EXCSRR1(r0)
         mtsrr1  r0
         mfsprg3 r0
         mtlr    r0
@@ -127,9 +127,9 @@ _ExcCommon:
 _StoreFrame:
 
         stfd    f0,IF_CONTEXT_FPR(r3)
-        mfsprg0 r0
+        lwz     r0,ZP_EXCSRR0(r0)
         stwu    r0,4(r3)
-        mfsprg1 r0
+        lwz     r0,ZP_EXCSRR1(r0)
         stwu    r0,4(r3)
         mfdar   r0
         stwu    r0,4(r3)
@@ -209,7 +209,7 @@ _StoreFrame:
         stfdu   f30,8(r3)
         stfdu   f31,8(r3)
 
-        mfsprg1 r0
+        lwz     r0,ZP_EXCSRR1(r0)                  #SRR1, for the VEC bit
         andis.  r0,r0,PSL_VEC@h
         bne     .DoVMX
         addi    r3,r3,8+8+512+16           #f31, alignstore, vectors, vscr
@@ -362,9 +362,9 @@ _StoreFrame:
 
 _LoadFrame:
         lwzu    r3,4(r31)
-        mtsprg0 r3
+        stw     r3,ZP_EXCSRR0(r0)                  #was mtsprg0
         lwzu    r3,4(r31)
-        mtsprg1 r3
+        stw     r3,ZP_EXCSRR1(r0)                  #was mtsprg1
         lwzu    r3,4(r31)
         mtdar   r3
         lwzu    r3,4(r31)
@@ -441,7 +441,7 @@ _LoadFrame:
         lfdu    f30,8(r31)
         lfdu    f31,8(r31)
 
-        mfsprg1 r3
+        lwz     r3,ZP_EXCSRR1(r0)                  #SRR1, for the VEC bit
         andis.  r3,r3,PSL_VEC@h
         bne     .DoAV
         addi    r31,r31,8+8+512+16
@@ -617,58 +617,138 @@ _SmallExcHandler:  #debugdebug to be redone
 
         stwu    r1,-512(r1)                  #Enough?
 
+#       SAVE THE CALLER'S NON-VOLATILES. _LoadFrame below loads r14-r30 from
+#       the frame and uses r31 as its walking pointer, and _StoreFrame stores
+#       r14-r31, so between them every one of this function's caller's
+#       non-volatile registers is replaced by the INTERRUPTED PROGRAM's value.
+#       CommonExcHandler, the caller, keeps iframe in r27, PowerPCBase in r24
+#       and currNode/nxtNode in r28/r29.
+#
+#       Reported as a data access exception at _CommonExcHandler+0x12C,
+#       "lwz r11,0(r27)" -- the "ec_ExcID != EXCF_DACCESS" test of
+#       kernel.c:912 -- with r27 holding an Amiga address. Reading ec_ExcID out
+#       of the iframe is a PPC-memory read and cannot fault, so the pointer was
+#       wrong rather than the access.
+#
+#       It hid behind a short-circuit: a handler returning EXCRETURN_ABORT
+#       leaves status non-zero, so that test's "bne" skips the only use of r27
+#       after the call, and "break" leaves the loop before currNode is read
+#       again. One ABORT handler therefore passes while every register is
+#       still wrong. tests/smallexc registers two handlers to defeat that.
+#
+#       The interrupted values stay live in r14-r31 through the middle of this
+#       function, which is what _StoreFrame needs to write them back; only the
+#       caller's copies are parked here. 340+72 = 412, inside the 512-byte
+#       frame, and clear of 300-336.
+#
+#       stmw/lmw ARE SAFE HERE, and the question has been settled rather than
+#       assumed. They are base 32-bit PowerPC Book I, not an optional
+#       extension: vasm accepts them under -mppc32, -m603e, -m750 and -m7400.
+#       The form is well-made too -- the EA is word-aligned, and rA is r1,
+#       outside the r14-r31 range, an lmw whose base register falls inside the
+#       loaded range being an invalid form.
+#
+#       The original uses them NOWHERE in powerpc.p, warp.p or the includes,
+#       and that is NOT evidence against them: WarpOS ran on Phase5 603e/604e
+#       boards -- warpos/blackbox/ holds BlizzardPPC, CyberStormPPC and
+#       P5DeveloperBoard -- and never on the G3/G4 this library targets. So its
+#       silence says nothing about these cores. They are microcoded on
+#       603e/750/74xx, which costs cycles on this path; explicit stw/lwz
+#       sequences would avoid that at ~136 bytes, and were weighed and
+#       declined.
+        stmw    r14,340(r1)
+
         mr      r31,r4
-        mtsprg0 r4
-        mtsprg3 r3
+        stw     r4,316(r1)                   #iframe. WAS mtsprg0, which _LoadFrame
+        stw     r3,320(r1)                   #ExcData. WAS mtsprg3, which it also takes
         mflr    r3
         stw     r3,-12(r4)                   #Store this function's lr
 
         bl      _LoadFrame                   #LR, r0, r1 and r3 are skipped in this routine and are loaded below
 
-        mfsprg0 r4
+        lwz     r4,316(r1)                   #iframe, intact across _LoadFrame
         lwz     r3,IF_CONTEXT_GPR+GPR3(r4)   #GPR[3]
-        stw     r3,300(r1)
-        mfsprg3 r3
+        stw     r3,SEH_XCONTEXT+XCO_R3(r1)   #+4, per powerpc.i:233
+        lwz     r3,IF_CONTEXT_EXCID(r4)      #the exception ID, kernel.c:49
+        stw     r3,SEH_XCONTEXT+XCO_EXCID(r1) #+0. THIS SLOT HELD r3 BEFORE, and
+                                             #+4 held a status word not written
+                                             #until after the handler returned,
+                                             #so iFUSION's exc_sc read nothing
+                                             #useful at 4(r3). FIXES.md item 11
+        lwz     r3,320(r1)                   #ExcData
         lwz     r0,IF_CONTEXT_LR(r4)         #EXC_LR
-        mtsprg1 r0
+        stw     r0,324(r1)
         stw     r0,-8(r4)                    #Will be used later in StoreFrame
         lwz     r0,IF_CONTEXT_GPR+GPR1(r4)   #GPR[1]
-        mtsprg2 r0
+        stw     r0,328(r1)
         stw     r2,-16(r4)
         lwz     r0,IF_CONTEXT_GPR+GPR2(r4)   #GPR[2]
-        lwz     r2,18(r3)                    #DATA
-        mtsprg3 r0
+        lwz     r2,18(r3)                    #DATA   (ed_Data; Node is 14 under pack(2))
+        stw     r0,332(r1)
         lwz     r0,14(r3)                    #CODE
         mtlr    r0
-        la      r3,300(r1)                   #XCONTEXT
+        la      r3,SEH_XCONTEXT(r1)          #XCONTEXT
         stw     r4,308(r1)
         lwz     r0,IF_CONTEXT_GPR+GPR0(r4)   #GPR[0]
         lwz     r4,IF_CONTEXT_GPR+GPR4(r4)   #GPR[4]
 
         blrl
 
-        stw     r3,304(r1)                   #Status
-        lwz     r3,300(r1)
+        stw     r3,SEH_STATUS(r1)            #Status. WAS 304, which is XCO_R3 now
+        lwz     r3,SEH_XCONTEXT+XCO_R3(r1)   #r3, as the handler may have changed it
         stw     r4,312(r1)                   #Temp store r4
-        mfsprg0 r4
+        lwz     r4,316(r1)                   #iframe
         stw     r3,IF_CONTEXT_GPR+GPR3(r4)   #GPR[3]
         stw     r0,IF_CONTEXT_GPR+GPR0(r4)   #GPR[0]
+
+#       _StoreFrame READS THREE THINGS FROM ITS CALLER and this function
+#       supplied none of them. _ExcCommon does, which is why the common path
+#       works and this one faulted at _StoreFrame's first instruction:
+#
+#         r3        the iframe, which it walks with stwu. HERE IT HELD THE
+#                   HANDLER'S RETURNED r3, with the iframe in r4, so
+#                   "stfd f0,IF_CONTEXT_FPR(r3)" stored through the handler's
+#                   return value. tests/smallexc found it as an alignment
+#                   exception at that instruction with r3 = its R3_OUT magic.
+#         104(r1)   the CR to write into IF_CONTEXT_CR. This function's frame
+#                   has nothing there, so the frame's CR was overwritten with
+#                   whatever that slot held. The XCONTEXT exposes only the
+#                   exception ID and r3, so a SMALLCONTEXT handler has no
+#                   sanctioned way to change CR; reloading the frame's own
+#                   value makes _StoreFrame write it back unchanged.
+#         0(r1)     the interrupted code's r1. Wrong here too -- it is this
+#                   function's back-chain -- but harmless, because the
+#                   epilogue below overwrites GPR[1] from 328(r1) afterwards.
+#                   Left alone: 0(r1) is what "lwz r1,0(r1)" returns on.
+#
+#       r0 is free, GPR[0] having just been stored, and r3 is free, GPR[3]
+#       having been stored on the line above.
+
+        lwz     r0,IF_CONTEXT_CR(r4)         #preserve the frame's CR
+        stw     r0,104(r1)
+        mr      r3,r4                        #_StoreFrame walks the iframe in r3
 
         bl      _StoreFrame
 
         lwz     r4,312(r1)                   #Really store r4
-        mfsprg0 r5
+        lwz     r5,316(r1)                   #iframe
         stw     r4,IF_CONTEXT_GPR+GPR4(r5)   #GPR[4]
-        mfsprg1 r6
+        lwz     r6,324(r1)                   #EXC_LR
         lwz     r4,-12(r5)                   #Retrieve this function's lr
         lwz     r2,-16(r5)
         stw     r6,IF_CONTEXT_LR(r5)         #EXC_LR
-        mfsprg2 r7
+        lwz     r7,328(r1)                   #GPR[1]
         mtlr    r4
-        mfsprg3 r6
+        lwz     r6,332(r1)                   #GPR[2]
         stw     r7,IF_CONTEXT_GPR+GPR1(r5)   #GPR[1]
-        lwz     r3,304(r1)                   #Return Status
+        lwz     r3,SEH_STATUS(r1)            #Return Status
         stw     r6,IF_CONTEXT_GPR+GPR2(r5)   #GPR[2]
+
+#       Restore the caller's non-volatiles. Everything above uses r0-r7 and r2
+#       only, all volatile or separately restored, so this is the last moment
+#       they are needed and the first at which they may be overwritten.
+        lmw     r14,340(r1)
+
         lwz     r1,0(r1)
 
         blr

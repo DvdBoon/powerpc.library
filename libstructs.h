@@ -89,6 +89,21 @@ ULONG               zp_PageTableSize;
 ULONG               zp_CacheGap[2];
 ULONG               zp_MemSize;
 volatile ULONG      zp_DECCounter;
+/*
+ * APPENDED, so every offset above keeps its value -- constantsppc.i hardcodes
+ * PPCMEMHEADER 8 and POWERPCBASE 0x10 against this struct.
+ *
+ * zp_ExcSRR0/zp_ExcSRR1 at 0x28/0x2C are where exception entry stages SRR0
+ * and SRR1 until _StoreFrame can write them to the frame, and where _LoadFrame
+ * puts them back for the exit to load. They used to be staged in SPRG0/SPRG1.
+ *
+ * zp_ExcScratch at 0x30 is what SPRG0 points at instead: the four words
+ * iFUSION's guest trampoline writes at 0(r1)..12(r1), with four spare, mirroring
+ * the 32 bytes warp.p:170 leaves above its exception stack. See FIXES.md item 9.
+ */
+volatile ULONG      zp_ExcSRR0;
+volatile ULONG      zp_ExcSRR1;
+volatile ULONG      zp_ExcScratch[8];
 };
 
 struct InternalConsts {
@@ -236,7 +251,31 @@ volatile UBYTE              pp_ExceptionMode;
 UBYTE                       pp_CacheDisDFlushAll;
 UBYTE                       pp_CacheDState;
 UBYTE                       pp_CacheDLockState;
-UBYTE                       pp_FlagReschedule;
+/*
+ * pp_FlagReschedule: set by anything that changes the run queue materially,
+ * consumed by CPUStats, which treats it as "recompute the load figures on this
+ * tick rather than waiting for pp_BusyCounter to expire". FIXES.md item 17 --
+ * it used to be written at four places and read at none.
+ *
+ * HOW IT MAPS ONTO THE ORIGINAL. There the trigger is a TIMEBASE DEADLINE
+ * rather than a flag: powerpc.p:4440 compares PPC_RESCH_TBL against mftbl,
+ * calls ReSchedule when due, and re-arms to now + RESCH_TICKS (2500000, about
+ * 150 ms; powerpc.p:21-23). CPUStats is already a port of ReSchedule's
+ * .calcload loop -- the same tp_Activity, tp_Busy and tp_CPUusage formulas and
+ * the same systemLoad/cpuLoad accumulation -- and already periodic, gated by
+ * pp_BusyCounter = 25, which at a 20 ms quantum is every 500 ms. So the
+ * deadline exists here as a tick counter, and the flag is the "sooner than
+ * that" signal, matching the original's shorter RESCH_DEFAULT of about 6 ms.
+ *
+ * THAT SECOND PASS IS NOW IMPLEMENTED -- this comment used to end "writes
+ * none of them, giving every task the same fixed pp_StdQuantum", which was
+ * true until 21 Oct 2026. tp_Desired comes from tp_Nice through the NICE table
+ * (FIXES.md item 18) and tp_Priority, tp_Prioffset and tp_Quantum are all
+ * written by CPUStats and SwitchPPC under the V14 priority rule (item 1). See
+ * prirule.h for the rule and for how the two base fields below were found to
+ * be named for the opposite of what they hold.
+ */
+UBYTE                       pp_FlagReschedule;      //read by CPUStats
 UBYTE                       pp_FlagForbid;
 UBYTE                       pp_FlagWait;
 UBYTE                       pp_FlagPortInUse;  //for nt_IntPort....not used
@@ -248,9 +287,13 @@ ULONG                       pp_CurrentTBL;
 ULONG                       pp_SystemLoad;
 ULONG                       pp_CPULoad;
 ULONG                       pp_NICETable;
+/* PPC_REACTION: the tunable DISTANCE, PRI_MAXDIST by default, SCHED_REACTION
+ * tag -- NOT a priority. The name has it backwards; see prirule.h. */
 LONG                        pp_LowActivityPri;
 ULONG                       pp_IdSysTasks;
 ULONG                       pp_IdUsrTasks;
+/* PPC_MINPRI: the RUNNING MINIMUM effective priority, starts at 0 and goes
+ * negative -- NOT an offset. The ceiling is these two added together. */
 LONG                        pp_LowActivityPriOffset;
 ULONG                       pp_ErrorStrings;
 ULONG                       pp_BusClock;
@@ -315,7 +358,19 @@ ULONG                       ed_Data;
 struct TaskPPC*             ed_Task;
 volatile ULONG              ed_Flags;
 ULONG                       ed_ExcID;
-ULONG                       ed_RemovalTime;
+/*
+ * ed_TimeBasePtr IS AN ADDRESS, NOT A TIME. EXCATTR_TIMEDREMOVAL's value is
+ * a pointer to a two-word timebase, [high, low]: iFUSION passes
+ * &DecDeadline[0] and &PublishedDeadline[0], filled by its read_timebase at
+ * 0x01ED0C and 0x01ED18. The original declares it the same way --
+ * warpos/warpos/powerpc_local.i:199 is "APTR X_TB" with "ULONG X_TBU" and
+ * "ULONG X_TBL" beside it, the same three fields in the same order -- and
+ * dereferences it at powerpc.p:5268, comparing [ptr+4] against X_TBL.
+ *
+ * Renamed from ed_RemovalTime, which said "time" of something holding an
+ * address. NOTHING READS IT YET: see FIXES.md item 8.
+ */
+APTR                        ed_TimeBasePtr;
 ULONG                       ed_TimeBaseUpper;
 ULONG                       ed_TimeBaseLower;
 struct ExcData*             ed_LastExc;

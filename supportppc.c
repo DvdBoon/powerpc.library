@@ -26,6 +26,7 @@
 #include "constants.h"
 #include "libstructs.h"
 #include "Internalsppc.h"
+#include "prirule.h"
 #pragma pack(pop)
 
 /********************************************************************************************
@@ -34,47 +35,18 @@
 *
 *********************************************************************************************/
 
+/*
+ * EnqueueTask, powerpc.p:3060-3105. The body moved to prirule.h so that
+ * kernel.c's SwitchPPC can use the same rule: a direct call from the kernel
+ * hunk into this one would land where the callee used to be, and the two
+ * copies of a scheduler rule would drift. The signed arithmetic is the change
+ * of substance -- tp_Priority and tp_Prioffset are ULONG in tasksPPC.h but the
+ * original compares them with cmpw, so a task past its share read as about
+ * 4.29 billion here and sorted to the front of the ready list.
+ */
 PPCFUNCTION VOID InsertOnPri(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct List* list, __reg("r5") struct TaskPPC* myTask)
 {
-    //myEnqueuePPC(PowerPCBase, list, (struct Node*)myTask);
-    //return;
-
-    LONG realPri    = myTask->tp_Priority + myTask->tp_Prioffset;
-    LONG defaultPri = PowerPCBase->pp_LowActivityPri + PowerPCBase->pp_LowActivityPriOffset;
-
-    if (realPri >= defaultPri)
-    {
-        realPri = defaultPri;
-        myTask->tp_Prioffset = defaultPri - myTask->tp_Priority;
-    }
-
-    struct Node* nextNode;
-    struct Node* myNode = list->lh_Head;
-    while (nextNode = myNode->ln_Succ)
-    {
-        struct TaskPPC* chkTask = (struct TaskPPC*)myNode;
-
-        if (chkTask->tp_Flags & TASKPPCF_ATOMIC)
-        {
-            myNode = nextNode;
-            break;
-        }
-
-        LONG cmpPri = chkTask->tp_Priority + chkTask->tp_Prioffset;
-
-        if (realPri > cmpPri)
-        {
-            break;
-        }
-
-        myNode = nextNode;
-    }
-
-    struct Node* pred = myNode->ln_Pred;
-	myNode->ln_Pred = (struct Node*)myTask;
-	myTask->tp_Task.tc_Node.ln_Succ = myNode;
-	myTask->tp_Task.tc_Node.ln_Pred = pred;
-	pred->ln_Succ = (struct Node*)myTask;
+    priInsert(PowerPCBase, (struct MinList*)list, myTask);
     return;
 }
 
@@ -594,16 +566,36 @@ PPCFUNCTION VOID GetBATs(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
 PPCFUNCTION VOID StoreBATs(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct TaskPPC* task)
 {
     ULONG key = mySuper(PowerPCBase);
+    struct BATArray* store = (struct BATArray*)task->tp_BATStorage;
+
+    /*
+     * SAVE FIRST, THEN INSTALL, matching GetBATs above. This used to install
+     * pp_StoredBATs and only then read the hardware back into the task, so
+     * what it stored was the four values it had just written -- the task's
+     * own BATs were lost at the moment they were meant to be preserved.
+     *
+     * AND THE LAST OFFSET WAS +64. struct BATArray is four ULONGs = 16 bytes
+     * and tp_BATStorage holds exactly four of them (functionsppc.c allocates
+     * sizeof(struct BATArray) * 4; kernel.c points it at nt_BatStore[4]), so
+     * valid offsets are 0, 16, 32 and 48 -- which is what GetBATs uses. The
+     * +64 wrote 16 bytes PAST the end: onto nt_Name[0..15] via kernel.c,
+     * since libstructs.h puts nt_Name[256] straight after nt_BatStore[4].
+     * Indexing the array removes the literals so the stride cannot drift
+     * again.
+     *
+     * NOT A LIVE BUG: the only caller of this function and of GetBATs is
+     * myChangeMMU, whose first statement is "return; //stub". Fixed here so
+     * it is not a trap for whoever implements that.
+     */
+    MoveFromBAT(CHMMU_BAT0, &store[0]);
+    MoveFromBAT(CHMMU_BAT1, &store[1]);
+    MoveFromBAT(CHMMU_BAT2, &store[2]);
+    MoveFromBAT(CHMMU_BAT3, &store[3]);
 
     MoveToBAT(CHMMU_BAT0, (struct BATArray*)&PowerPCBase->pp_StoredBATs[0]);
     MoveToBAT(CHMMU_BAT1, (struct BATArray*)&PowerPCBase->pp_StoredBATs[1]);
     MoveToBAT(CHMMU_BAT2, (struct BATArray*)&PowerPCBase->pp_StoredBATs[2]);
     MoveToBAT(CHMMU_BAT3, (struct BATArray*)&PowerPCBase->pp_StoredBATs[3]);
-
-    MoveFromBAT(CHMMU_BAT0, (struct BATArray*)(((ULONG)task->tp_BATStorage) + 0));
-    MoveFromBAT(CHMMU_BAT1, (struct BATArray*)(((ULONG)task->tp_BATStorage) + 16));
-    MoveFromBAT(CHMMU_BAT2, (struct BATArray*)(((ULONG)task->tp_BATStorage) + 32));
-    MoveFromBAT(CHMMU_BAT3, (struct BATArray*)(((ULONG)task->tp_BATStorage) + 64));
 
     myUser(PowerPCBase, key);
 }
@@ -837,6 +829,9 @@ PPCFUNCTION VOID SetupRunPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
         mySetCache(PowerPCBase, CACHE_DCACHEINV, myFrame->mf_PPCArgs.PP_Stack, myFrame->mf_PPCArgs.PP_StackSize);
     }
 
+    /* assign the 68k mask over this task's -- Sonnet's StartCode does
+     * exactly this here, ppcfunctions.p:10334-10335; see kernel.c's ID_DONE
+     * handler for the other sites and the reasoning */
     myTask->tp_Task.tc_SigAlloc = myFrame->mf_Arg[1];
 
     struct iframe storeFrame;

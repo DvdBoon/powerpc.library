@@ -965,7 +965,10 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     PowerPCBase->pp_PPCMemSize = initData->id_MemSize;
     PowerPCBase->pp_IdUsrTasks = 100;
     PowerPCBase->pp_BusyCounter = 24;
-    PowerPCBase->pp_LowActivityPri = 6000;
+    /* powerpc.p:906, "stwi PRI_MAXDIST,PPC_REACTION(r30)" -- THIS is the
+     * field that slot holds. The SCHED_REACTION tag overrides it at
+     * functionsppc.c:3178, as the original does at :13215-13231. */
+    PowerPCBase->pp_LowActivityPri = PRI_MAXDIST;
     PowerPCBase->pp_EnAlignExc = initData->id_Environment1 >> 8;
     PowerPCBase->pp_EnDAccessExc = initData->id_Environment2 >> 8;
     PowerPCBase->pp_CacheDisDFlushAll = initData->id_Environment2 >> 24;
@@ -1023,6 +1026,29 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
         }
     }
 
+    /*
+     * The NICE weighting table, FIXES.md item 18. It lives in supportppc.s --
+     * see GetNiceTable there for the values and why it cannot be a C array:
+     * under -sc a C table is addressed through the small-data area and this
+     * library has no _SDA_BASE_. pp_NICETable had no mentions at all in
+     * lib/*.c before this.
+     */
+    PowerPCBase->pp_NICETable = (ULONG)GetNiceTable();
+
+    /*
+     * THE RUNNING MINIMUM STARTS AT ZERO, and this line used to set it to
+     * PRI_MAXDIST with powerpc.p:906's citation attached -- the right citation
+     * on the wrong field. pp_LowActivityPriOffset sits in PPC_MINPRI's slot,
+     * not PPC_REACTION's (see prirule.h for how that is settled), and the
+     * original never initialises PPC_MINPRI at all: it is written in exactly
+     * two places, lowered to a task's effective priority at :4888 and raised
+     * by the per-pass relief at :5578. Setting it to 6000 put the enqueue
+     * ceiling at MINPRI + REACTION = 12000 instead of 6000 from the first
+     * instruction. Written explicitly rather than relying on the allocation
+     * being zeroed.
+     */
+    PowerPCBase->pp_LowActivityPriOffset = 0;
+
     PowerPCBase->pp_LowerLimit = *((ULONG*)(((ULONG)PowerPCBase + _LVOInsertPPC + 2)));
     PowerPCBase->pp_UpperLimit = *((ULONG*)(((ULONG)PowerPCBase + _LVOFindNamePPC + 2)));
     PowerPCBase->pp_StdQuantum = quantum;
@@ -1050,6 +1076,27 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     }
 
     setupCaches(PowerPCBase, initData);
+
+    /*
+     * SPRG0 GETS THE MEANING IT HAS UNDER REAL WarpOS: a pointer, set once at
+     * init, that exception entry never overwrites. warp.p:170-172 points it at
+     * the top of a 16 KB exception stack plus 32 bytes, and every WarpOS
+     * exception entry moves DOWN from it (warp.p:3453), so those top words are
+     * dead space. iFUSION's guest trampoline at h2:0x0058 borrows them: it does
+     * "mfspr r1,SPRG0" and writes four words at 0(r1)..12(r1) to preserve the
+     * guest's r3-r6 across its host-service "sc". Nothing in iFUSION ever
+     * writes SPRG0 -- it expects to find it set up.
+     *
+     * zp_ExcScratch is eight words in page zero serving that purpose. It is
+     * absolutely addressed, so it needs no allocation and no assumption about
+     * the effective-to-physical mapping, and the BAT that covers page zero is
+     * BAT_VALID_SUPERVISOR|BAT_VALID_USER.
+     *
+     * This is only safe because kernel.s no longer stages SRR0/SRR1 in
+     * SPRG0/SPRG1 -- it uses zp_ExcSRR0/zp_ExcSRR1 -- and _SmallExcHandler no
+     * longer parks anything in the SPRGs. See FIXES.md item 9.
+     */
+    setSPRG0((ULONG)&myZP->zp_ExcScratch[0]);
 
     myZP->zp_Status = STATUS_READY;
 
