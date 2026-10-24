@@ -366,7 +366,7 @@ VOID SystemStart(__r3 struct PrivatePPCBase* PowerPCBase);
 void DispatchPPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFrame* newtask);
 void StartTask(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFrame* myFrame);
 void KillTask(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFrame* myFrame);
-void CommonExcHandler(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct iframe* iframe, __r5 struct List* excList);
+ULONG CommonExcHandler(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct iframe* iframe, __r5 struct List* excList);
 void CommonExcError(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct iframe* iframe);
 VOID CPUStats(__r3 struct PrivatePPCBase* PowerPCBase);
 VOID FlushDCache(__r3 struct PrivatePPCBase* PowerPCBase);

@@ -123,6 +123,63 @@ static ULONG decShorten(struct PrivatePPCBase* PowerPCBase, ULONG decValue)
 *
 *********************************************************************************************/
 
+/*
+ * THE FRAME CONTRACT, CHECKED. A LARGECONTEXT handler receives &if_Context,
+ * which is the frame (IF_CONTEXT is 0), and what the exit installs is the
+ * frame: these are the offsets the rebuild duplicates (recon stands alone),
+ * libstructs.h at struct iframe. A wrong number here is a compile error.
+ */
+typedef char iframe_contract_holds[
+    (__offsetof(struct iframe, if_BATs)     ==  964 &&
+     __offsetof(struct iframe, if_Segments) == 1028 &&
+     __offsetof(struct iframe, if_ExcNum)   == 1092 &&
+     __offsetof(struct iframe, if_SDR1)     == 1096 &&
+     sizeof(struct iframe)                == 1100) ? 1 : -1];
+
+#ifdef EXC_TIMING
+/*
+ * THE TIMING BUILD (constants.h MMU_ZERO_TIME_*). Called at every C entry,
+ * once the exception number is known: the PREVIOUS exception's stamps are
+ * complete by now -- its T0..T2 were copied to TIME_PREV at its own entry,
+ * its T3..T8 are still in place because this exception has not reached
+ * them -- so its eight phase lengths are added up when its number is the
+ * one asked for and its handler stamps were written. Then this one's
+ * T0..T2 and number are kept and its handler stamps cleared.
+ */
+#define TIME_STAMP(n)   (*((volatile ULONG*)(MMU_ZERO_TIME_T0 + 4 * (n))) = getTBL())
+static void excTimingAccount(ULONG excNum)
+{
+    volatile ULONG* t = (volatile ULONG*)MMU_ZERO_TIME_T0;
+    volatile ULONG* p = (volatile ULONG*)MMU_ZERO_TIME_PREV;
+    volatile ULONG* s = (volatile ULONG*)MMU_ZERO_TIME_SUMS;
+    ULONG want = *((volatile ULONG*)MMU_ZERO_TIME_WANT);
+    if (want && (p[3] == want) && t[3] && t[4])
+    {
+        ULONG st[9];
+        st[0] = p[0];
+        st[1] = p[1];
+        st[2] = p[2];
+        for (int i = 3; i < 9; i++)
+        {
+            st[i] = t[i];
+        }
+        for (int i = 0; i < 8; i++)
+        {
+            s[i] += st[i + 1] - st[i];
+        }
+        *((volatile ULONG*)MMU_ZERO_TIME_COUNT) += 1;
+    }
+    p[0] = t[0];
+    p[1] = t[1];
+    p[2] = t[2];
+    p[3] = excNum;
+    t[3] = 0;
+    t[4] = 0;
+}
+#else
+#define TIME_STAMP(n)
+#endif
+
 PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct iframe* iframe)
 {
     PowerPCBase->pp_ExceptionMode = -1;
@@ -147,6 +204,9 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
     ULONG ExceptionVector = iframe->if_Context.ec_ExcID - (PPC_VECLEN * OPCODE_LEN);
     iframe->if_ExcNum = ExceptionVector >> 8;
     iframe->if_Context.ec_ExcID = 1 << iframe->if_ExcNum;
+#ifdef EXC_TIMING
+    excTimingAccount(iframe->if_ExcNum);
+#endif
 
     switch (ExceptionVector)
     {
@@ -351,9 +411,19 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
         }
         case VEC_DATASTORAGE:
         {
-            if (PowerPCBase->pp_EnDAccessExc)  //not standard WOS behaviour
+            /*
+             * STANDARD WarpOS ORDER: the task's DACCESS handlers see the fault
+             * first (powerpc.p:4222 queues them on PPC_EXC_DSI, which the DSI
+             * path walks before anything else), and EXCRETURN_ABORT claims it.
+             * The 68k proxy below is this platform's own -- the PPC cannot reach
+             * Amiga memory -- and runs only when no handler claimed the fault;
+             * iFUSION's handlers return NORMAL when no guest is running.
+             * sonnet/EnDAccessExc, which used to gate the handlers, is no longer
+             * read here. FIXES.md "THE LIBRARY HALF OF R", 24 Oct 2026.
+             */
+            if (CommonExcHandler(PowerPCBase, iframe, (struct List*)&PowerPCBase->pp_ExcDAccess) == EXCRETURN_ABORT)
             {
-                CommonExcHandler(PowerPCBase, iframe, (struct List*)&PowerPCBase->pp_ExcDAccess);
+                break;
             }
             if ((iframe->if_Context.ec_DAR == 4) || ((iframe->if_Context.ec_DAR < 0xfffff800) && (iframe->if_Context.ec_DAR > 0x800)))
             {
@@ -1509,7 +1579,7 @@ static BOOL excTimedDue(struct ExcData* excData, struct iframe* iframe)
 *
 *********************************************************************************************/
 
-PPCKERNEL void CommonExcHandler(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct iframe* iframe, __reg("r5") struct List* excList)
+PPCKERNEL ULONG CommonExcHandler(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct iframe* iframe, __reg("r5") struct List* excList)
 {
     struct ExcData* nxtNode;
     struct ExcData* currNode = (struct ExcData*)excList->lh_Head;
@@ -1538,12 +1608,16 @@ PPCKERNEL void CommonExcHandler(__reg("r3") struct PrivatePPCBase* PowerPCBase, 
                 {
                     ULONG (*ExcHandler)(__reg("r2") ULONG, __reg("r3") struct EXCContext*) = currNode->ed_Code;
                     ULONG tempR2 = getR2();
+                    TIME_STAMP(3);
                     status = ExcHandler(currNode->ed_Data, &iframe->if_Context);
+                    TIME_STAMP(4);
                     storeR2(tempR2);
                 }
                 else if (currNode->ed_Flags & EXCF_SMALLCONTEXT)
                 {
+                    TIME_STAMP(3);
                     status = SmallExcHandler(currNode, iframe);
+                    TIME_STAMP(4);
                 }
                 if (status == EXCRETURN_ABORT)
                 {
@@ -1558,7 +1632,7 @@ PPCKERNEL void CommonExcHandler(__reg("r3") struct PrivatePPCBase* PowerPCBase, 
     {
         CommonExcError(PowerPCBase, iframe);
     }
-    return;
+    return status;              /* the DSI case asks: ABORT claimed the fault */
 }
 
 /********************************************************************************************

@@ -857,6 +857,16 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
     myBase->pp_MirrorList.mlh_TailPred = (struct MinNode*)&myBase->pp_MirrorList.mlh_Head;
     myBase->pp_UtilityBase             = UtilityBase;
     myBase->pp_PPCMemBase              = (ULONG)myZeroPage;
+    /*
+     * THE KERNEL'S EXCEPTION STACK, in ordinary cached PPC memory, as the
+     * original takes its own from the memory powerpc.library hands
+     * warp.library at Energize (warp.p:128, :164-172). A 68k address in PPC
+     * memory is the PPC's effective address, so setupppc.c uses it as it
+     * is. If the allocation fails the word stays 0 and the exception entry
+     * keeps using the interrupted r1, as it did before 24 Oct 2026.
+     * FIXES.md "THE PHASE SPLIT", 24 Oct 2026.
+     */
+    myBase->pp_ExcStackMem = AllocVec(EXCSTACK_SIZE, MEMF_PUBLIC|MEMF_PPC|MEMF_REVERSE|MEMF_CLEAR);
 
     myZeroPage->zp_SysBase      = SysBase;
     myZeroPage->zp_PPCMemHeader = myPPCMemHeader;

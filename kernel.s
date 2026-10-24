@@ -38,6 +38,10 @@ _ExcCommon:
         b       ExcDStoreTLBMiss
 
         mtsprg2 r0                                         #LR; sprg3 = r0
+.ifdef EXC_TIMING
+        mftb    r0                                         #T0 entry, untranslated
+        stw     r0,ZP_TIME_T0(r0)
+.endif
 
         mfsrr0  r0
         stw     r0,ZP_EXCSRR0(r0)                  #was mtsprg0; SPRG0 is iFUSION's
@@ -207,16 +211,33 @@ _ExcCommon:
         lwz     r0,ZP_MMU_TASK_SDR1(r0)
         cmpw    r0,r3
         beq     .MMUInSame
+#       A TAGGED TASK NEEDS NO FLUSH (iFUSION only; FIXES.md "STAGE 3").
+#       Its segment registers carry VSID_TAG, a VSID bit the library's never
+#       do, so none of its TLB entries can answer a library access, and
+#       the library's own entries are still right for the library's table.
+#       WarpOS flushes at every table switch (warp.p:1697-1703); this
+#       DIVERGES on purpose for the tagged case only. CR is parked; r3
+#       is the library's SDR1.
+        lwz     r0,ZP_MMU_TASK_SEGS+0(r0)
+        andis.  r0,r0,VSID_TAG_HI
+        beq     .MMUInFlush
+        sync
+        mtsdr1  r3
+        sync
+        isync
+        b       .MMUInSame
+.MMUInFlush:
         mfctr   r0
         stw     r0,ZP_MMU_SAVE_CTR(r0)
         li      r0,64
         mtctr   r0
-        li      r0,0
-.MMUInTLB:
-        tlbie   r0
-        addi    r0,r0,0x1000
-        bdnz    .MMUInTLB
+        li      r3,0                                       #r3, NOT r0: addi with rA=r0 adds to the literal
+.MMUInTLB:                                                 #zero, so "addi r0,r0,0x1000" flushed only EA 0 and
+        tlbie   r3                                         #0x1000. warp.p:1697-1703 counts in r3. The task's
+        addi    r3,r3,0x1000                               #r3 is parked in ZP_MMU_SAVE_R3 and comes back at
+        bdnz    .MMUInTLB                                  #.MMUInSame.
         sync
+        lwz     r3,ZP_MMU_LIB_SDR1(r0)
         mtsdr1  r3
         sync
         isync
@@ -232,11 +253,41 @@ _ExcCommon:
         mtmsr   r0			                   #Reenable MMU
         sync                                               #Also reenable FPU
         isync
+.ifdef EXC_TIMING
+        mftb    r0                                         #T1 translation on, the library's MMU installed
+        stw     r0,ZP_TIME_T1(r0)
+.endif
 
-        stwu    r1,-2048(r1)
-
+#       THE KERNEL'S OWN STACK, NOT THE INTERRUPTED r1. WarpOS's stubs take
+#       theirs from SPRG0 (warp.p:3453 "mfsprg stack,0", the EXCSTACK of
+#       warp.p:14 and :171) and never touch the interrupted r1. iFUSION's
+#       guest runs with its OWN r1 live, a guest address, which under the
+#       library's translation points into the low 2 MB: "stwu r1,-2048(r1)"
+#       on it put this frame over page zero and the kernel. The outermost
+#       entry takes ZP_EXCSTACK; a nested one stays on the stack it is on,
+#       and so does everything until setup has written the word. The back
+#       chain at 0(r1) still holds the interrupted r1, which _StoreFrame
+#       reads as GPR[1]. FIXES.md "THE LIBRARY HALF OF R", 24 Oct 2026.
         mfcr    r0
+        stw     r0,ZP_ENTRY_CR(r0)
+        stw     r4,ZP_ENTRY_R4(r0)
+        lwz     r4,ZP_EXCDEPTH(r0)
+        cmpwi   r4,0
+        addi    r4,r4,1
+        stw     r4,ZP_EXCDEPTH(r0)
+        bne     .Nested
+        lwz     r4,ZP_EXCSTACK(r0)
+        cmpwi   r4,0
+        beq     .Nested
+        stw     r1,0(r4)                                   #back chain: the interrupted r1
+        mr      r1,r4
+        b       .Stacked
+.Nested:
+        stwu    r1,-2048(r1)
+.Stacked:
+        lwz     r0,ZP_ENTRY_CR(r0)
         stw     r0,104(r1)
+        lwz     r4,ZP_ENTRY_R4(r0)
         stw     r4,108(r1)
 
         lwz     r4,0x24(r0)
@@ -269,7 +320,15 @@ _ExcCommon:
         bl      _StoreFrame                  #r0, r3 and r4 are skipped in this routine and were saved above
 
         lwz     r3,POWERPCBASE(r0)                      #Loads PowerPCBase
+.ifdef EXC_TIMING
+        mftb    r0                                         #T2 frame saved, into the C kernel
+        stw     r0,ZP_TIME_T2(r0)
+.endif
         bl      _Exception_Entry
+.ifdef EXC_TIMING
+        mftb    r0                                         #T5 back from the C kernel
+        stw     r0,ZP_TIME_T5(r0)
+.endif
 
         lwz     r31,POWERPCBASE(r0)
         lwz     r31,POWERPCBASE_THISPPCTASK(r31)
@@ -290,7 +349,15 @@ _ExcCommon:
 
         bl      _LoadFrame                   #LR, r0,r1 and r3 are skipped in this routine and are loaded below
 
+.ifdef EXC_TIMING
+        mftb    r0                                         #T6 frame restored
+        stw     r0,ZP_TIME_T6(r0)
+.endif
         bl      _FlushICache
+.ifdef EXC_TIMING
+        mftb    r0                                         #T7 after the instruction-cache flush
+        stw     r0,ZP_TIME_T7(r0)
+.endif
 
 #       THE TASK'S MMU STATE BACK, WITH TRANSLATION OFF. Everything the exit
 #       still needs from the frame -- CR, CTR, r0, r1, r3 -- is staged in page
@@ -408,20 +475,36 @@ _ExcCommon:
         mfsdr1  r0
         cmpw    r0,r3
         beq     .ExitSame
+        lwz     r0,ZP_MMU_TASK_SEGS+0(r0)                  #a tagged task: no flush, as at entry
+        andis.  r0,r0,VSID_TAG_HI
+        beq     .ExitFlush
+        sync
+        mtsdr1  r3                                         #r3 is the task's SDR1, from .ExitSDR1
+        sync
+        isync
+        b       .ExitSame
+.ExitFlush:
         li      r0,64
         mtctr   r0
-        li      r0,0
+        li      r3,0                                       #r3, NOT r0, as at .MMUInTLB
 .ExitTLB:
-        tlbie   r0
-        addi    r0,r0,0x1000
+        tlbie   r3
+        addi    r3,r3,0x1000
         bdnz    .ExitTLB
         sync
+        lwz     r3,ZP_MMU_TASK_SDR1(r0)                     #the SDR1 chosen at .ExitSDR1
         mtsdr1  r3
         sync
         isync
 .ExitSame:
         lwz     r0,ZP_MMU_SAVE_CTR(r0)
         mtctr   r0
+        lwz     r3,ZP_EXCDEPTH(r0)                          #one level up; the stack is simply abandoned.
+        cmpwi   r3,0                                       #An exit without an entry (setup's own first rfi)
+        beq     .DepthZero                                 #leaves it at 0. r3, NOT r0: "subi r0,r0,1" is
+        subi    r3,r3,1                                    #"li r0,-1", which made every second exception
+        stw     r3,ZP_EXCDEPTH(r0)                          #skip the kernel stack. r3 is reloaded below.
+.DepthZero:
         lwz     r0,ZP_MMU_EXIT_CR(r0)
         mtcr    r0
         lwz     r3,ZP_MMU_EXIT_R3(r0)
@@ -433,6 +516,10 @@ _ExcCommon:
         mtsrr0  r0
         lwz     r0,ZP_EXCSRR1(r0)
         mtsrr1  r0
+.ifdef EXC_TIMING
+        mftb    r0                                         #T8 task MMU and registers back, at the rfi
+        stw     r0,ZP_TIME_T8(r0)
+.endif
         mfsprg3 r0
         mtlr    r0
         mfsprg2 r0

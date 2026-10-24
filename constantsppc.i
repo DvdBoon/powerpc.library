@@ -238,6 +238,18 @@
 .set ZP_MMU_SAVE_CR,            0x21B0            #parked across the entry's SDR1 compare
 .set ZP_MMU_SAVE_CTR,           0x21B4            #and across both tlbie loops
 .set ZP_MMU_SAVE_R3,            0x21B8
+.set ZP_EXCSTACK,               0x21C0            #r1 for the outermost exception: the kernel stack, see constants.h
+.set ZP_EXCDEPTH,               0x21C4            #nesting depth: entry +1, exit -1; 0 = take ZP_EXCSTACK
+.set ZP_ENTRY_CR,               0x21C8            #the interrupted CR and r4, parked while the entry picks its stack
+.set ZP_ENTRY_R4,               0x21CC
+.set VSID_TAG_HI,               0x0080            #VSID bit 23 >> 16: a task whose SR0 has it needs no TLB flush
+.set ZP_TIME_T0,                0x2200            #the timing build only: constants.h MMU_ZERO_TIME_*
+.set ZP_TIME_T1,                0x2204
+.set ZP_TIME_T2,                0x2208
+.set ZP_TIME_T5,                0x2214
+.set ZP_TIME_T6,                0x2218
+.set ZP_TIME_T7,                0x221C
+.set ZP_TIME_T8,                0x2220
 
 .set POWERPCBASE,               0x10              #Align this number with the zp struct in libstructs.h
 .set POWERPCBASE_THISPPCTASK,   0x94              #debugdebug need to find to link this to libstruct.h

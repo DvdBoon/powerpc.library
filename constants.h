@@ -274,6 +274,41 @@
 #define MMU_ZERO_LIB_BATS       0x2000
 #define MMU_ZERO_LIB_SEGS       0x2040
 #define MMU_ZERO_LIB_SDR1       0x2080
+#define MMU_ZERO_EXCSTACK       0x21C0  /* r1 for the outermost exception: the kernel stack's
+                                         * top less EXCSTACK_TOPGAP; 0 until setup sets it */
+#define MMU_ZERO_EXCDEPTH       0x21C4  /* nesting depth: entry +1, exit -1 */
+#define MMU_ZERO_ENTRY_CR       0x21C8  /* the interrupted CR and r4, parked while the
+                                         * entry picks its stack */
+#define MMU_ZERO_ENTRY_R4       0x21CC
+/* THE KERNEL'S EXCEPTION STACK, as WarpOS has one (warp.p:14 EXCSTACK, :171-172
+ * into SPRG0): EXCSTACK_SIZE bytes of cached PPC memory that libinit.c
+ * allocates (pp_ExcStackMem). NOT a fixed offset below OFFSET_SYSMEM any
+ * more: 0x3F0000 was inside the message window, which BAT2 maps
+ * cache-inhibited for data, and it made every exception about 10 us
+ * slower (FIXES.md "THE PHASE SPLIT", 24 Oct 2026). kernel.s and
+ * _SmallExcHandler use 0..332(r1) ABOVE r1, so the entry r1 sits
+ * EXCSTACK_TOPGAP below the top. */
+#define EXCSTACK_SIZE           0x10000
+#define EXCSTACK_TOPGAP         (2048 + 32)
+/* THE LIBRARY MARK. setup writes it at MMU_ZERO_BUILDMARK; tests/excframe prints
+ * it, so a run on a resident older library says so instead of failing
+ * mysteriously (24 Oct 2026: the unclamped depth word). Bump by hand. */
+#define MMU_ZERO_BUILDMARK      0x21D0
+#define LIB_BUILDMARK           0x26102504  /* variant 4, exception stack cached; built 24 Oct 2026, the digits say 25 */
+/* THE TIMING BUILD (build.ps1 -Timing, -DEXC_TIMING; FIXES.md "THE TIMING
+ * BUILD", 24 Oct 2026). Timebase stamps T0..T8 at 0x2200..0x2220 at nine
+ * points of the exception path; the previous exception's T0..T2 and its
+ * number at 0x2224..0x2230. At each C entry the previous exception's eight
+ * phase lengths are added to TIME_SUMS[0..7] when its number is TIME_WANT
+ * and its handler stamps T3/T4 were written, counted in TIME_COUNT. A
+ * normal build writes none of these words. */
+#define MMU_ZERO_TIME_T0        0x2200
+#define MMU_ZERO_TIME_PREV      0x2224
+#define MMU_ZERO_TIME_SUMS      0x2240
+#define MMU_ZERO_TIME_COUNT     0x2260
+#define MMU_ZERO_TIME_WANT      0x2264
+#define MMU_ZERO_TIME_MARK      0x2268
+#define TIME_MARK_VALUE         0x54494D45  /* "TIME": this is the timing build */
 
 //Bit defines for the L2CR register
 

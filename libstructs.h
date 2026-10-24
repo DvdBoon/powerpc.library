@@ -304,6 +304,15 @@ struct BATArray             pp_ExceptionBATs[4];
 struct BATArray             pp_StoredBATs[4];
 struct BATArray             pp_SystemBATs[4];
 ULONG                       pp_SystemSegs[16];
+/*
+ * THE KERNEL'S EXCEPTION STACK, EXCSTACK_SIZE bytes of CACHED PPC memory
+ * allocated by libinit.c; setupppc.c points ZP_EXCSTACK near its top.
+ * Appended, so every offset above keeps its value. It used to be a fixed
+ * offset inside the message window, which BAT2 maps cache-inhibited for
+ * data, and every stack access of the exception path went to the bus.
+ * FIXES.md "THE PHASE SPLIT", 24 Oct 2026.
+ */
+APTR                        pp_ExcStackMem;
 };
 
 struct killFIFO {
@@ -320,6 +329,22 @@ ULONG                       kf_MIIFH;
 ULONG                       kf_MIIPT;
 };
 
+/*
+ * THE FRAME A LARGECONTEXT HANDLER SEES. CommonExcHandler passes &if_Context,
+ * and IF_CONTEXT is 0, so that pointer IS the frame, and a handler may read
+ * and WRITE the whole of it. What the exit installs at the rfi, untranslated,
+ * is this frame: ec_UPC.ec_SRR0/ec_SRR1 become SRR0/SRR1 (_LoadFrame), ec_GPR[]
+ * the registers, if_BATs the sixteen BAT words, if_Segments the sixteen
+ * segment registers, if_SDR1 the page table (tp_Table, when set, wins). This
+ * is what WarpOS gives a handler by running it untranslated and taking the
+ * live registers at the rfi (warp.p:4615-4642); here EA != PA, so the frame
+ * stands in. Offsets from the context pointer, which recon/ duplicates:
+ * if_BATs +964, if_Segments +1028, if_ExcNum +1092, if_SDR1 +1096, size
+ * 1100; kernel.c checks them at compile time. BAT words and SDR1 are
+ * PHYSICAL, as the hardware takes them. EXCRETURN_ABORT stops the chain and,
+ * for a DACCESS fault, keeps the 68k proxy out. FIXES.md "THE LIBRARY HALF
+ * OF R", 24 Oct 2026.
+ */
 struct iframe {
 struct EXCContext           if_Context;
 ULONG                       if_AlignStore[2];

@@ -769,11 +769,25 @@ FUNC68K void MirrorTask(void)
 
     struct Task* myTask = SysBase->ThisTask;
 
+    /*
+     * THE DIRECTORY LOCK DOS GAVE THIS PROCESS, put back before every return.
+     * DOS unlocks pr_CurrentDir when a CreateNewProc process ends. A PPC task
+     * may CurrentDir() a lock it does not own onto its mirror -- iFUSION's
+     * poll task sets the Shell's own lock, emulate.c:1233, and never DupLocks
+     * it -- and that lock would be freed with the mirror: after one run the
+     * Shell reported iFUSION "not an executable" until a reset. The
+     * original's mirrors come from CreateProc (powerpc.s:2162), whose exit
+     * unlocks nothing, which is why the original leaves the Shell intact.
+     * FIXES.md "THE MIRROR'S DIRECTORY LOCK", 23 Oct 2026.
+     */
+    BPTR startDir = ((struct Process*)myTask)->pr_CurrentDir;
+
     myTask->tc_Flags &= ~TF_PPC;
 
     if (!(mirrorPort = CreateMsgPort()))
     {
         PrintError(SysBase, "General memory allocation error");
+        ((struct Process*)myTask)->pr_CurrentDir = startDir;
         return;
     }
 
@@ -920,6 +934,7 @@ FUNC68K void MirrorTask(void)
                     Enable();
                     FreeVec(myMirror);
                 }
+                ((struct Process*)myTask)->pr_CurrentDir = startDir;
                 return;
             }
             else

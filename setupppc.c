@@ -1117,6 +1117,24 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
      * SPRG0/SPRG1 -- it uses zp_ExcSRR0/zp_ExcSRR1 -- and _SmallExcHandler no
      * longer parks anything in the SPRGs. See FIXES.md item 9.
      */
+    /*
+     * THE KERNEL'S EXCEPTION STACK (constants.h EXCSTACK_*): the entry's r1
+     * for the outermost exception, as WarpOS's stubs take theirs from SPRG0
+     * (warp.p:3453). Until this word is written the entry keeps using the
+     * interrupted r1. FIXES.md "THE LIBRARY HALF OF R", 24 Oct 2026.
+     */
+    *((ULONG*)MMU_ZERO_EXCDEPTH) = 0;
+    *((ULONG*)MMU_ZERO_BUILDMARK) = LIB_BUILDMARK;
+#ifdef EXC_TIMING
+    for (ULONG a = MMU_ZERO_TIME_T0; a < MMU_ZERO_TIME_MARK; a += 4)
+    {
+        *((ULONG*)a) = 0;
+    }
+    *((ULONG*)MMU_ZERO_TIME_MARK) = TIME_MARK_VALUE;
+#endif
+    *((ULONG*)MMU_ZERO_EXCSTACK) = (PowerPCBase->pp_ExcStackMem)
+        ? (((ULONG)PowerPCBase->pp_ExcStackMem + EXCSTACK_SIZE - EXCSTACK_TOPGAP) & ~15UL)
+        : 0;                     /* 0: the entry keeps the interrupted r1 */
     setSPRG0((ULONG)&myZP->zp_ExcScratch[0]);
 
     myZP->zp_Status = STATUS_READY;
