@@ -223,7 +223,8 @@ What has changed since 17.14:
 - Added basic support for Bigfoot/Xeno Killer 2100 PCIe cards.
 - Added Altivec support for CopyMemPPC when available. Needs 128bit alignment.
 - Added NoZeroGuard as an ENV option. See above.
-- Changed description for ENV option SetCPUComm: Shogo needs it.
+- Changed description for ENV option SetCPUComm: If Shogo hangs, try it with
+  this set.
 
 What has changed since 17.13b:
 

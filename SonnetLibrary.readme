@@ -97,7 +97,7 @@ are:
   to 68K memory like stack and task structures. **EXPERIMENTAL**
   Only used up to 17.13b.
 - SetCPUComm (0 or 1): If set will use another method of handling cross-cpu
-  signalling. Shogo needs this for 17.15. Default = 0.
+  signalling. If Shogo hangs, try it with this set. Default = 0.
 - NoZeroGuard (0 or 1): If set the kernel does not protect the zero page
   anymore. For badly behaving games/programs (such as Shogo). Default = 0.
   **USE AT OWN RISK!!!**
