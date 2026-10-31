@@ -408,6 +408,9 @@ VOID SetupRunPPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFrame* 
 VOID FlushICache(VOID);
 ULONG* GetDecTable(VOID);
 ULONG* GetNiceTable(VOID);
+ULONG SuperTrap(VOID);                  /* supportppc.s: Super()'s trap, warp.p:803-807 */
+VOID  SuperLocation(VOID);              /* supportppc.s: the trapping mfpvr; kernel.c compares
+                                         * SRR0 with its ADDRESS -- never called */
 ULONG* getTableFX(VOID);
 ULONG* getTable100(VOID);
 ULONG* getTable66(VOID);

@@ -314,6 +314,16 @@ ULONG                       pp_SystemSegs[16];
  * FIXES.md "THE PHASE SPLIT", 24 Oct 2026.
  */
 APTR                        pp_ExcStackMem;
+/*
+ * THE ADDRESS OF SuperLocation, the one mfpvr in supportppc.s's SuperTrap that
+ * kernel.c's VEC_PROGRAM arm takes for Super(), as WarpOS compares SRR0 with
+ * SuperLocation (warp.p:4588-4602). Stored by libinit.c's mymakeLibrary on
+ * the 68k side, moved by funOffset into the COPY of the functions hunk the
+ * PPC runs, as its function table is: the PPC C code cannot take a symbol's
+ * address (no _SDA_BASE_) and the kernel is another hunk. Appended, so no
+ * earlier offset moves. FIXES.md "ITEM 3, Super()".
+ */
+ULONG                       pp_SuperLocation;
 };
 
 struct killFIFO {

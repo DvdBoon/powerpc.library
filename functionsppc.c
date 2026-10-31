@@ -2019,11 +2019,16 @@ PPCFUNCTION VOID myRemExcHandler(__reg("r3") struct PrivatePPCBase* PowerPCBase,
 
 PPCFUNCTION ULONG mySuper(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 {
-    ULONG result = -1;
-
-    result = getCPUState(result, SUPERKEY);
-
-    return result;
+    /*
+     * RECOGNISED BY ADDRESS, as WarpOS (warp.p:803-807, :4588-4602) and
+     * 17.13b (ppcfunctions.p:2988-2995, setupppc.p:6302-6317) do: the mfpvr
+     * at SuperLocation traps in user mode, and kernel.c's VEC_PROGRAM arm
+     * takes only that address for Super(). It used to be SUPERKEY in r4,
+     * which any program exception carrying that value matched. Returns 0
+     * when this switched to supervisor, -1 when already there. FIXES.md
+     * "ITEM 3, Super()", 31 Oct 2026.
+     */
+    return SuperTrap();
 }
 
 /********************************************************************************************

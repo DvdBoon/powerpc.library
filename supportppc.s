@@ -24,7 +24,7 @@
 
 .global     _LockMutexPPC, _FreeMutexPPC, _CopyMemQuickPPC, _SwapStack, _SetFPExc
 .global     _FinalCalc, _Calculator, _FPE_Enable, _FPE_Disable, _RunCPP, _GetDecTable
-.global     _CopyMemQuickVMX
+.global     _CopyMemQuickVMX, _SuperTrap, _SuperLocation
 
 #********************************************************************************************
 
@@ -732,6 +732,24 @@ _FPE_Disable:
         blr
 
 .Bit_4: mtfsb0	24
+        blr
+
+#********************************************************************************************
+#
+#    SuperTrap: Super()'s switch to supervisor mode, WarpOS's SuperMode instruction for
+#    instruction (warp.p:803-807) and 17.13b's Super (ppcfunctions.p:2988-2995). In user
+#    mode the mfpvr at _SuperLocation raises the program exception; kernel.c's VEC_PROGRAM
+#    arm knows it by that ADDRESS alone, skips it, clears PR and sets the frame's r0 to 0,
+#    so this returns 0. In supervisor mode mfpvr runs and this returns -1. Only r0 and r3
+#    change. FIXES.md "ITEM 3, Super()", 31 Oct 2026.
+#
+#********************************************************************************************
+
+_SuperTrap:
+        li      r0,-1
+_SuperLocation:
+        mfpvr   r3                      #user mode: the program exception, known by this address
+        mr      r3,r0                   #0 when the kernel switched to supervisor, -1 when already
         blr
 
 #********************************************************************************************

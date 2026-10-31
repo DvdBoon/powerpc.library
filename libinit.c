@@ -236,6 +236,18 @@ struct PPCBase *mymakeLibrary(struct InternalConsts *myConsts, ULONG funPointer)
         baseMem -= 6;
     }
 
+    /*
+     * WHERE Super() TRAPS, IN THE COPY THE PPC RUNS. The functions hunk was
+     * copied to funMem above, so SuperLocation moves by funOffset exactly as
+     * every PPC vector in the loop does. kernel.c's VEC_PROGRAM arm knows
+     * Super() by this address alone, as WarpOS knows SuperLocation
+     * (warp.p:4588-4602, patched into its stub at install, :5389) and 17.13b
+     * ViolationAddress (setupppc.p:6302-6317). The first build stored the
+     * unmoved address, and opening the library ended in a program exception
+     * at the copy's mfpvr. FIXES.md "ITEM 3, Super()", 31 Oct 2026.
+     */
+    ((struct PrivatePPCBase*)PowerPCBase)->pp_SuperLocation = (ULONG)SuperLocation + funOffset;
+
     CacheClearU();
 
     InitStruct(&LibInitData[0], PowerPCBase, 0);

@@ -517,11 +517,22 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
         }
         case VEC_PROGRAM:
         {
-            if (iframe->if_Context.ec_GPR[4] == SUPERKEY)
+            /*
+             * SUPER() IS KNOWN BY ITS ADDRESS: the one mfpvr at SuperLocation
+             * (supportppc.s), as WarpOS's Exc7 compares SRR0 with SuperLocation
+             * (warp.p:4588-4602) and 17.13b's .Private with ViolationAddress
+             * (setupppc.p:6302-6317). The address comes from the base, where
+             * libinit.c stored it: this hunk cannot take it itself. r0 = 0 is
+             * the status SuperTrap returns through "mr r3,r0". Any other
+             * program exception, whatever r4 holds, goes to the handlers. It
+             * used to test GPR[4] == SUPERKEY. FIXES.md "ITEM 3, Super()",
+             * 31 Oct 2026.
+             */
+            if ((PowerPCBase->pp_SuperLocation) && (iframe->if_Context.ec_UPC.ec_SRR0 == PowerPCBase->pp_SuperLocation))
             {
                 iframe->if_Context.ec_UPC.ec_SRR0  += 4;
                 iframe->if_Context.ec_SRR1         &= ~PSL_PR;
-                iframe->if_Context.ec_GPR[3]        = 0;            //Set SuperKey
+                iframe->if_Context.ec_GPR[0]        = 0;            //the SuperKey, returned by SuperTrap
                 //PowerPCBase->pp_Quantum = getDEC() + 1000;
             }
             else
