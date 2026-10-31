@@ -1012,7 +1012,7 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     PowerPCBase->pp_BusyCounter = 24;
     /* powerpc.p:906, "stwi PRI_MAXDIST,PPC_REACTION(r30)" -- THIS is the
      * field that slot holds. The SCHED_REACTION tag overrides it at
-     * functionsppc.c:3178, as the original does at :13215-13231. */
+     * functionsppc.c:3355, as the original does at :13215-13231. */
     PowerPCBase->pp_LowActivityPri = PRI_MAXDIST;
     PowerPCBase->pp_EnAlignExc = initData->id_Environment1 >> 8;
     PowerPCBase->pp_EnDAccessExc = initData->id_Environment2 >> 8;
@@ -1125,6 +1125,13 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     PowerPCBase->pp_StdQuantum = quantum;
     PowerPCBase->pp_BusClock = busclock;
 
+    /*
+     * pp_ExceptionBATs: the set a WarpOS SetExcMMU would load (WarpOS loads
+     * PPC_BAT, powerpc.p:8116-8148). The same live BATs as pp_SystemBATs
+     * below, and read by nothing: SetExcMMU is a no-op here, as in 17.13b,
+     * because the handlers already run under the library's set. FIXES.md
+     * "ITEM 6, SetExcMMU / ClearExcMMU", 31 Oct 2026.
+     */
     mvfrBAT0(&PowerPCBase->pp_ExceptionBATs[0]);
     mvfrBAT1(&PowerPCBase->pp_ExceptionBATs[1]);
     mvfrBAT2(&PowerPCBase->pp_ExceptionBATs[2]);

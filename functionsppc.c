@@ -2351,6 +2351,17 @@ PPCFUNCTION VOID myUnLockTaskList(__reg("r3") struct PrivatePPCBase* PowerPCBase
 
 PPCFUNCTION VOID mySetExcMMU(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 {
+    /*
+     * A NO-OP, AS IN 17.13b (ppcfunctions.p:491-508, its MMU lines
+     * commented out) and 17.15. WarpOS runs exception handlers untranslated
+     * and SetExcMMU (powerpc.p:8053-8158) gives one its BAT set with
+     * translation on. Here every handler already runs translated under the
+     * library's BATs, segment registers and SDR1, installed by the exception
+     * entry (kernel.s:151-267); pp_ExceptionBATs, the set a port would load,
+     * holds the same BATs (setupppc.c:1135-1143). It compiles to a bare blr:
+     * every register is kept (WarpOS promises all but r0 and r3). FIXES.md
+     * "ITEM 6, SetExcMMU / ClearExcMMU", 31 Oct 2026.
+     */
     return;
 }
 
@@ -2362,6 +2373,16 @@ PPCFUNCTION VOID mySetExcMMU(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 
 PPCFUNCTION VOID myClearExcMMU(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 {
+    /*
+     * A NO-OP, AS IN 17.13b (ppcfunctions.p:516-534, its MMU lines
+     * commented out) and 17.15. WarpOS's ClearExcMMU (powerpc.p:8172-8236)
+     * switches translation OFF and restores the BATs SetExcMMU saved. Here a
+     * handler's code, stack and frame are 68k-view addresses, EA = PA +
+     * id_MemBase (kernel.s:71-79): with translation off its next
+     * instruction could not be fetched. The handler keeps the library's MMU
+     * until the exception exit installs the task's (kernel.s:444 on).
+     * FIXES.md "ITEM 6, SetExcMMU / ClearExcMMU", 31 Oct 2026.
+     */
     return;
 }
 

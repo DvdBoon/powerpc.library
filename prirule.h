@@ -27,8 +27,8 @@
  * pp_LowActivityPriOffset -- the same slots in the same order. Behaviour
  * confirms it independently: the original defaults PPC_REACTION to PRI_MAXDIST
  * (powerpc.p:906) and lets the SCHED_REACTION tag set it clamped to 1..20 then
- * multiplied by 1000 (:13215-13231), which is exactly what setupppc.c:968 and
- * functionsppc.c:3178-3189 do to pp_LowActivityPri. So:
+ * multiplied by 1000 (:13215-13231), which is exactly what setupppc.c:1016 and
+ * functionsppc.c:3355-3367 do to pp_LowActivityPri. So:
  *
  *     pp_LowActivityPri        IS  PPC_REACTION   the tunable DISTANCE, 6000
  *     pp_LowActivityPriOffset  IS  PPC_MINPRI     the running MINIMUM, from 0
