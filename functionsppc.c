@@ -2515,35 +2515,45 @@ PPCFUNCTION VOID myGetInfo(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
                             myTagItem->ti_Data = CPUF_603E;
                             break;
                         }
+                        /*
+                         * FROM THE PVR, ON BOTH BOARDS, AND ALWAYS WRITTEN, as
+                         * 17.13b answered it (ppcfunctions.p:1219-1252). The
+                         * Harrier arm used to answer only a 750FX or a 7410
+                         * and write nothing for any other CPU, so the caller
+                         * got back whatever it had passed; the MPC107 arm
+                         * called every unknown CPU, a 745x included, a G3.
+                         * Unknown is 0, as in 17.13b and in WarpOS, whose
+                         * GetInfo always writes PPCCPU (powerpc.p:12036-12042)
+                         * and sets it 0 for a type it does not know
+                         * (:1005-1038). Wider than 17.13b, which matched only
+                         * the 750s at 0x00080xxx and 0x00088xxx and only the
+                         * 7450 of the 745x family. FIXES.md "ITEM 5,
+                         * GETINFO_CPU", 31 Oct 2026.
+                         */
                         case DEVICE_HARRIER:
-                        {
-                            if (PowerPCBase->pp_CPUInfo >> 24 == 0x70)
-                            {
-                                myTagItem->ti_Data = CPUF_G3;
-                                break;
-                            }
-                            else if ((PowerPCBase->pp_CPUInfo >> 12 & 0xff) == 0xc1)
-                            {
-                                myTagItem->ti_Data = CPUF_7410 | CPUF_7400;
-                                break;
-                            }
-                            break;
-                        }
                         case DEVICE_MPC107:
                         {
-                            if ((PowerPCBase->pp_CPUInfo >> 12 & 0xff) == 0xc1)
+                            ULONG version = PowerPCBase->pp_CPUInfo >> 16;
+
+                            if ((version >> 8 == 0x70) || (version == 0x0008))
+                            {
+                                myTagItem->ti_Data = CPUF_G3;           /* 750FX/GX, 750/750CX/755 */
+                            }
+                            else if (version == 0x000C)
+                            {
+                                myTagItem->ti_Data = CPUF_7400;         /* 7400 */
+                            }
+                            else if (version == 0x800C)
                             {
                                 myTagItem->ti_Data = CPUF_7410 | CPUF_7400;
-                                break;
                             }
-                            else if ((PowerPCBase->pp_CPUInfo >> 12 & 0xff) == 0xc0)
+                            else if ((version >= 0x8000) && (version <= 0x8004))
                             {
-                                myTagItem->ti_Data = CPUF_7400;
-                                break;
+                                myTagItem->ti_Data = CPUF_7441 | CPUF_7400;  /* 745x/744x */
                             }
                             else
                             {
-                                myTagItem->ti_Data = CPUF_G3;
+                                myTagItem->ti_Data = 0;
                             }
                             break;
                         }

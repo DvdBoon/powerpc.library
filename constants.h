@@ -107,6 +107,7 @@
 
 #define CPUF_7410               0x00800000
 #define CPUF_7400               0x00400000
+#define CPUF_7441               0x01000000  /* the 745x/744x, 17.13b ppcdefines.i:322 */
 
 /* Used by ENV:sonnet/ReportG4asG3 (LIB_FLAGPPC_RG3): with it set, every G4
  * is reported as a G3 and AltiVec is never enabled. The G4-as-G3 test build
