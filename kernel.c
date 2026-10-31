@@ -648,7 +648,25 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
         }
     }
     PowerPCBase->pp_ExceptionMode = 0;
-    setDEC(decShorten(PowerPCBase, PowerPCBase->pp_Quantum));
+    /*
+     * THE DECREMENTER IS PROGRAMMED WHERE WarpOS PROGRAMS IT AND NOWHERE ELSE:
+     * at the end of the decrementer exception, after the scheduler and the
+     * DEC handler list (powerpc.p:5315), and in the external interrupt, where
+     * WarpOS forces a reschedule with "mtdec 0" (powerpc.p:5769, :5802) and
+     * this library switches tasks itself (SwitchPPC above). Those are the
+     * only two cases that switch tasks. Every other exception leaves DEC
+     * counting. Until 24 Oct 2026 it was set here after ALL of them, from the
+     * pp_StdQuantum Exception_Entry puts back first, so every exception
+     * restarted the time slice: a task taking exceptions faster than its
+     * quantum was never preempted and no timed handler ran -- iFUSION's guest
+     * traps on every privileged instruction -- and a handler's own DEC write
+     * was thrown away: iFUSION's mtdec emulation sets DEC to 100 at 0x01DDAC
+     * to be called back. FIXES.md "STAGE 5".
+     */
+    if ((ExceptionVector == VEC_DECREMENTER) || (ExceptionVector == VEC_EXTERNAL))
+    {
+        setDEC(decShorten(PowerPCBase, PowerPCBase->pp_Quantum));
+    }
     return;
 }
 

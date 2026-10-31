@@ -294,7 +294,10 @@
  * it, so a run on a resident older library says so instead of failing
  * mysteriously (24 Oct 2026: the unclamped depth word). Bump by hand. */
 #define MMU_ZERO_BUILDMARK      0x21D0
-#define LIB_BUILDMARK           0x26102504  /* variant 4, exception stack cached; built 24 Oct 2026, the digits say 25 */
+#define LIB_BUILDMARK           0x26102405  /* 24 Oct 2026, variant 5: DEC programmed only after
+                                             * the decrementer and external exceptions. Variant 4,
+                                             * the cached exception stack, was 0x26102504: its
+                                             * date digits were a day ahead. */
 /* THE TIMING BUILD (build.ps1 -Timing, -DEXC_TIMING; FIXES.md "THE TIMING
  * BUILD", 24 Oct 2026). Timebase stamps T0..T8 at 0x2200..0x2220 at nine
  * points of the exception path; the previous exception's T0..T2 and its
