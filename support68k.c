@@ -555,7 +555,7 @@ APTR AllocFunc(__reg("d0") ULONG size, __reg("d1") ULONG flags, __reg("a6") stru
      * memory, every other hunk PPC memory. This used to be skipped when
      * PPC_Flags bit 0x4 -- LIB_FLAGPPC_SCC, ENV:sonnet/SetCPUComm -- was set,
      * which sent every hunk to PPC memory. That test was a mistake (the
-     * user, 31 Oct 2026): 17.3b made this choice on DisHunkPatch
+     * user, 31 Oct 2026): 17.13b made this choice on DisHunkPatch
      * (powerpc.s:3526-3528), and SetCPUComm is about cross-CPU signals,
      * which functionsppc.c still handles. Removed; this is what an unset
      * SetCPUComm always did.

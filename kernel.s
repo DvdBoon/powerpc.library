@@ -348,12 +348,12 @@ _ExcCommon:
 
 #       THE I-CACHE IS FLUSHED ONLY WHEN ANOTHER TASK RESUMES. The I-cache sees
 #       no stores, the 68k's over PCI or the PPC's own, so code placed where
-#       other code ran is stale until a flush. 17.3b flushed at every exit
+#       other code ran is stale until a flush. 17.13b flushed at every exit
 #       (setupppc.p:3445, :4147, :5318, :6328), which cost 5.5 us a trap on a
 #       7410, whose L2 is off the die: ReFused on the G4 could not boot. WarpOS
 #       flushes no exit, only where code changes (warp.p:2674-2675,
 #       CreateTaskPPC powerpc.p:9304, SetCache powerpc.p:11144/11147). This
-#       keeps 17.3b's flush wherever a different task (or idle) takes over --
+#       keeps 17.13b's flush wherever a different task (or idle) takes over --
 #       a program's first run (DispatchPPC, kernel.c:1459), a RunPPC waking a
 #       waiting task, a Run68K returning after a wait -- and drops it on traps
 #       that return to the task they interrupted. A nested trap still flushes.

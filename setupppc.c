@@ -770,14 +770,14 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
     }
 
     /*
-     * ENV:sonnet/SetCMemDiv, the L2 clock divider: read since 17.3b, never
-     * used by the C library until 31 Oct 2026. As 17.3b's setupppc.p
+     * ENV:sonnet/SetCMemDiv, the L2 clock divider: read since 17.13b, never
+     * used by the C library until 31 Oct 2026. As 17.13b's setupppc.p
      * :1308-1343 does it, after the CPU speed: 1, 2, 3, 4 replace the /3
      * programmed above with /1, /1.5, /2, /2.5 in L2CR, the L2 still
-     * enabled; 0 and 5 (and 6, 7) keep /3. 17.3b's default also clocked a
+     * enabled; 0 and 5 (and 6, 7) keep /3. 17.13b's default also clocked a
      * 400 MHz CPU with 1 MB of L2 at /2 (:1331-1338); that is left out, so
      * an unset variable changes nothing. Only where this function set up an
-     * external L2 itself: 17.3b also wrote L2CR on a 750FX or 745x, whose L2
+     * external L2 itself: 17.13b also wrote L2CR on a 750FX or 745x, whose L2
      * is on the chip. An if/else chain, not a switch: this function lives
      * in .setupppc (PPCSETUP) and a jump table would not.
      */

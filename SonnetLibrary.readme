@@ -53,11 +53,10 @@ Restrictions:
  
 The PPC CPU on the PPC PCI card cannot DMA to Amiga memory. Any access to
 non-PPC/PCI memory by the PPC is very slow. The library is trying to avoid
-this by means of patching the AllocMem(), LoadSeg() and process creation
-functions (the latter is optional). This way, PPC data and code is pushed
-to the memory residing on the PPC card itself. This is not 100% watertight and
-failure of these patches can lead to a DSI/ISI exception or very slow execution
-of the PPC program.
+this by means of patching the AllocMem() and LoadSeg() functions. This way,
+PPC data and code is pushed to the memory residing on the PPC card itself.
+This is not 100% watertight and failure of these patches can lead to a DSI/ISI
+exception or very slow execution of the PPC program.
 
 Not all functions of the original WarpOS powerpc.library are yet implemented or
 will be implemented (for example memory protection). 100% compatibility will
