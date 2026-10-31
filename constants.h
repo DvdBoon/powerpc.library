@@ -314,6 +314,9 @@
  * it, so a run on a resident older library says so instead of failing
  * mysteriously (24 Oct 2026: the unclamped depth word). Bump by hand. */
 #define MMU_ZERO_BUILDMARK      0x21D0
+#define MMU_ZERO_EXIT_ICFLUSH   0x21D4  /* kernel.s only: nonzero when this exit
+                                         * flushes the I-cache (FIXES.md "CAN THE
+                                         * PER-TRAP I-CACHE FLUSH GO?") */
 #define LIB_BUILDMARK           0x26102405  /* 24 Oct 2026, variant 5: DEC programmed only after
                                              * the decrementer and external exceptions. Variant 4,
                                              * the cached exception stack, was 0x26102504: its

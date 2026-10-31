@@ -308,6 +308,7 @@ _ExcCommon:
 
         lwz     r4,POWERPCBASE(r0)
         lwz     r4,POWERPCBASE_THISPPCTASK(r4)
+        stw     r4,112(r1)                                 #the task this trap interrupted, 0 = idle: read at the exit
         mr.     r4,r4
         bne     .NoIdl
 
@@ -344,6 +345,29 @@ _ExcCommon:
 
         lwz     r31,POWERPCBASE(r0)
         lwz     r31,POWERPCBASE_THISPPCTASK(r31)
+
+#       THE I-CACHE IS FLUSHED ONLY WHEN ANOTHER TASK RESUMES. The I-cache sees
+#       no stores, the 68k's over PCI or the PPC's own, so code placed where
+#       other code ran is stale until a flush. 17.3b flushed at every exit
+#       (setupppc.p:3445, :4147, :5318, :6328), which cost 5.5 us a trap on a
+#       7410, whose L2 is off the die: ReFused on the G4 could not boot. WarpOS
+#       flushes no exit, only where code changes (warp.p:2674-2675,
+#       CreateTaskPPC powerpc.p:9304, SetCache powerpc.p:11144/11147). This
+#       keeps 17.3b's flush wherever a different task (or idle) takes over --
+#       a program's first run (DispatchPPC, kernel.c:1459), a RunPPC waking a
+#       waiting task, a Run68K returning after a wait -- and drops it on traps
+#       that return to the task they interrupted. A nested trap still flushes.
+#       The decision is made here, while r1 is still this trap's frame, and
+#       kept in page 0x2000 across _LoadFrame. FIXES.md "CAN THE PER-TRAP
+#       I-CACHE FLUSH GO?", 31 Oct 2026.
+        lwz     r3,112(r1)                                 #the task the entry recorded
+        li      r0,1
+        cmpw    r3,r31
+        bne     .ICSet                                     #another task, or idle, resumes: flush
+        lwz     r3,ZP_EXCDEPTH(r0)
+        subi    r0,r3,1                                    #nested (depth > 1): flush. r3 as the base: "subi r0,r0,1" is "li r0,-1"
+.ICSet: stw     r0,ZP_EXIT_ICFLUSH(r0)
+
         mr.     r31,r31
         bne     .NI2                                       #trash everything, is idle task.
 
@@ -365,7 +389,11 @@ _ExcCommon:
         mftb    r0                                         #T6 frame restored
         stw     r0,ZP_TIME_T6(r0)
 .endif
+        lwz     r0,ZP_EXIT_ICFLUSH(r0)                     #decided above; r0 and cr0 are free here,
+        cmpwi   r0,0                                       #CR comes back from ZP_MMU_EXIT_CR below
+        beq     .ICKeep
         bl      _FlushICache
+.ICKeep:
 .ifdef EXC_TIMING
         mftb    r0                                         #T7 after the instruction-cache flush
         stw     r0,ZP_TIME_T7(r0)

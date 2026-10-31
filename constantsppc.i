@@ -242,6 +242,8 @@
 .set ZP_EXCDEPTH,               0x21C4            #nesting depth: entry +1, exit -1; 0 = take ZP_EXCSTACK
 .set ZP_ENTRY_CR,               0x21C8            #the interrupted CR and r4, parked while the entry picks its stack
 .set ZP_ENTRY_R4,               0x21CC
+                                                  #0x21D0 is constants.h's MMU_ZERO_BUILDMARK
+.set ZP_EXIT_ICFLUSH,           0x21D4            #nonzero: this exit flushes the I-cache (another task resumes, or nested)
 .set VSID_TAG_HI,               0x0080            #VSID bit 23 >> 16: a task whose SR0 has it needs no TLB flush
 .set ZP_TIME_T0,                0x2200            #the timing build only: constants.h MMU_ZERO_TIME_*
 .set ZP_TIME_T1,                0x2204
