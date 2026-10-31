@@ -457,16 +457,25 @@ PPCFUNCTION struct TaskPPC* myCreateTaskPPC(__reg("r3") struct PrivatePPCBase* P
                                                 memFrame->if_Context.ec_SRR1 = MACHINESTATE_DEFAULT;
                                                 memFrame->if_Context.ec_GPR[2] = getR2();
 
+                                                /*
+                                                 * TASKATTR_BAT: THE FLAG, AND EVERY TASK'S BATs. WarpOS gives
+                                                 * such a task PPC_BAT and sets TASKPPCF_BAT (powerpc.p:9130-9143),
+                                                 * but PPC_BAT maps the Amiga space with EA == PA
+                                                 * (powerpc.p:529-578), which no PCI card has, and this library
+                                                 * has no BAT mode (ChangeMMU is a stub, as in 17.13b). This used
+                                                 * to copy pp_StoredBATs, which nothing fills: the task started
+                                                 * with all four BATs zero ("Not working"). 17.13b set the flag
+                                                 * and copied an array nothing filled either
+                                                 * (ppcfunctions.p:4977-5004), so its tasks all ran alike. Now
+                                                 * the flag is set as in both originals and the BATs are the
+                                                 * system ones every task gets. FIXES.md "ITEM 14C", 31 Oct 2026.
+                                                 */
                                                 if (value = myGetTagDataPPC(PowerPCBase, TASKATTR_BAT, 0, taglist))
                                                 {
-                                                    myCopyMemPPC(PowerPCBase, &PowerPCBase->pp_StoredBATs, &memFrame->if_BATs, sizeof(struct BATArray) * 4);  //Not working
-                                                    myCopyMemPPC(PowerPCBase, &PowerPCBase->pp_StoredBATs, newTask->tp_BATStorage, sizeof(struct BATArray) * 4);
+                                                    newTask->tp_Flags |= TASKPPCF_BAT;
                                                 }
-                                                else
-                                                {
-                                                    myCopyMemPPC(PowerPCBase, &PowerPCBase->pp_SystemBATs, &memFrame->if_BATs, sizeof(struct BATArray) * 4);
-                                                    myCopyMemPPC(PowerPCBase, &PowerPCBase->pp_SystemBATs, newTask->tp_BATStorage, sizeof(struct BATArray) * 4);
-                                                }
+                                                myCopyMemPPC(PowerPCBase, &PowerPCBase->pp_SystemBATs, &memFrame->if_BATs, sizeof(struct BATArray) * 4);
+                                                myCopyMemPPC(PowerPCBase, &PowerPCBase->pp_SystemBATs, newTask->tp_BATStorage, sizeof(struct BATArray) * 4);
 
                                                 for (int i = 0; i < 16; i++)
                                                 {
@@ -2426,6 +2435,15 @@ PPCFUNCTION VOID myChangeMMU(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
     args.db_Arg[0] = mode;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
+    /*
+     * A STUB ON PURPOSE, as in 17.13b (ppcfunctions.p:8165 "#STUB", the
+     * early epilog at :8169-8178). WarpOS's ChangeMMU (powerpc.p:11965-11994)
+     * switches a task to PPC_BAT, a set that maps the Amiga space with
+     * EA == PA (powerpc.p:529-578); a PCI card has no such set, and the
+     * page table already maps a task's memory. The draft below is never
+     * reached, and its two arms are the wrong way round against both
+     * originals. FIXES.md "ITEM 14C", 31 Oct 2026.
+     */
     return; //stub
 
     struct TaskPPC* myTask = PowerPCBase->pp_ThisPPCProc;
