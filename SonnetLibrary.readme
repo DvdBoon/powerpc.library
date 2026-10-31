@@ -1,0 +1,418 @@
+Short:		Driver for G3/G4 PCI cards
+Uploader:	dennisvdboon@gmail.com (Dennis Boon)
+Author:		dennisvdboon -> gmail (Dennis Boon)
+Type:		driver/other
+Version:	17.16
+Architecture:	m68k-amigaos = 3.9
+Distribution:	Aminet
+URL:		https://github.com/Sakura-IT/SonnetAmiga
+
+Slightly less short:
+
+The included powerpc.library is a driver for the Sonnet 7200 G3/G4 PCI card,
+the Force PowerPMC-250 G4 PMC card and the PrPMC8xx range of cards.
+ 
+What is needed:
+ 
+- Amiga with Zorro III/PCI slots.
+- Elbox Mediator 3000Di/4000Di with 3.3V rail.
+- Prometheus PCI Zorro III bridge with FireStorm upgrade (17.14).
+- 68040 or better.
+- A Radeon 92xx, 3DFX Voodoo3/4/5 or Permedia2 card (prometheus/17.14)
+- Warp3D 4.2 for 3D graphics in combination with a 3DFX Voodoo card.
+- Sonnet 7200 PCI Card. Supported are MG3-400-512K; MG3-400-1M; MG3-500-1M; 
+  MG4-400-1M.
+- 5V 168 pins FPM DIMMs 2K Refresh (up to 256 MB in combination with the
+  Voodoo3; 128MB with other supported video cards) for the Sonnet.
+- Force PowerPMC-250 Card boasting a 450MHz G4 CPU and on-board SDRAM. PMC
+  carrier card required.
+- Motorola PrPMC8xx cards with Harrier chipset with either G3 or G4 processor
+  and 256MB of on-board SDRAM. PMC carrier card required.
+- Bigfoot Killer NIC M1 PCI card with 400MHz MPC8343E and 64MB on-board RAM
+- Bigfoot Killer NIC K1 PCI card with 333MHz MPC8343E and 64MB on-board RAM
+- Bigfoot/Xeno Killer NIC 2100 PCIe card with 400MHz MPC8314E and 128MB
+  on-board RAM. This only works partially for Xilinx based Prometheus cards.
+  Full support will need a further FirmWare fix.
+- pci.library version 13.8 or higher from Elbox (does not support PCIe cards).
+- prometheus.library version 4.5 or higher (17.14+).
+- AHI for sound. AHI 4.18 recommended.
+ 
+What does it do:
+ 
+The library interfaces between the CPU and the memory on certain PCI cards
+which contain PPC CPUs (e.g Sonnet Crescendo 7200 etc.) and the Amiga CPU and
+memory. It also offers WarpOS compatible functions.
+ 
+What does this mean:
+ 
+It essentially adds a second CPU to your Amiga through the PCI slot. 
+This being any of 400MHz MPC8343E up to 1GHz 7450 G4 CPUs. This CPU can be used
+to run (certain) WarpOS software.
+
+Restrictions:
+ 
+The PPC CPU on the PPC PCI card cannot DMA to Amiga memory. Any access to
+non-PPC/PCI memory by the PPC is very slow. The library is trying to avoid
+this by means of patching the AllocMem(), LoadSeg() and process creation
+functions (the latter is optional). This way, PPC data and code is pushed
+to the memory residing on the PPC card itself. This is not 100% watertight and
+failure of these patches can lead to a DSI/ISI exception or very slow execution
+of the PPC program.
+
+Not all functions of the original WarpOS powerpc.library are yet implemented or
+will be implemented (for example memory protection). 100% compatibility will
+probably be never achieved, mostly due to hardware banging of certain WarpOS
+software (e.g. PayBack).
+
+Sound is restricted to AHI. Paula 8 bit DMA is the recommended setting. At this
+moment, the SB128 and FM801 drivers sometimes produce a distortion in the sound
+output with certain bridges. Paula 8 bit Fast modes have seen some success too.
+
+Albeit that the library supports AltiVec code, this has not been fully tested
+as there exist to this moment no WarpOS programs with AltiVec code. That being
+said, there is a test dnetc client with AltiVec enabled for WarpOS and the
+latest SDL library contains AltiVec code.
+
+Options:
+
+The library reads its options from ENV:sonnet when it starts; save them in
+ENVARC:sonnet to keep them. Each value is a single digit. Currently supported
+are:
+
+- EnEDOMem (0 or 1): Enable if you have EDO RAM installed. Default = 0.
+  Only used up to 17.13b.
+- Debug (0-3): Set the level of debug messages. 0 = no messages (default).
+- EnMemExc (0 or 1): With 1, Alignment and Data Access (DSI) exceptions go
+  to the registered exception handlers first, as on WarpOS; an alignment
+  exception that no handler takes crashes the task. With 0, the library
+  first emulates the misaligned access or does the 68K memory access itself,
+  and the handlers only get what it cannot do. Needed by ReFused. Replaces
+  EnAlignExc and EnDAccessExc (up to 17.15). Default = 0.
+- DisL2Cache (0 or 1): Disable the L2 cache. Default = 0. Only used up to
+  17.13b.
+- DisL2Flush (0 or 1): Disables the full flush of the L2 cache. 
+  Can speed up things if it doesn't crash. Default = 0.
+- DisHunkPatch (0 or 1): Disable automatic pushing first code hunk to FAST RAM.
+  Default = 0.
+- EnStackPatch (0 or 1): Enable if you want the library to push more 68K data
+  to 68K memory like stack and task structures. **EXPERIMENTAL**
+  Only used up to 17.13b.
+- SetCPUComm (0 or 1): If set will use another method of handling cross-cpu
+  signalling. Shogo needs this for 17.15. Default = 0.
+- NoZeroGuard (0 or 1): If set the kernel does not protect the zero page
+  anymore. For badly behaving games/programs (such as Shogo). Default = 0.
+  **USE AT OWN RISK!!!**
+- SetCMemDiv (0-5): Sets the speed divider of the L2 Cache memory.
+  5 = 3, 4 = 2.5, 3 = 2, 2 = 1.5, 1 = 1, 0 = library default (3). Default = 0.
+  For example: A Sonnet with speed 500 MHz and setting 5 will run the L2 cache
+  at 166 MHz (500/3). No effect on a 750FX or 745x, whose L2 cache is on the
+  CPU. **USE AT OWN RISK!!!**
+- ReportG4asG3 (0 or 1): If set, a G4 is reported as a G3 by GetCPU() and by
+  GetInfo() (CPU and PVR), and AltiVec is not enabled. Default = 0.
+ 
+Notes:
+ 
+The included powerpc.library is for PCI PPC cards only and not compatible with
+CPU/expansion slot PPC solutions (BPPC, CSPPC etc.).
+ 
+Refer to https://github.com/Sakura-IT/SonnetAmiga or /PowerPCAmiga for the
+latest build and the latest documentation regarding compatibility, FAQs and
+issues.
+
+See http://amigafun.blogspot.com/search/label/Sonnet for some demonstrations of
+the Sonnet card in action.
+
+In the archive:
+
+powerpc.library:	Library that initializes the PPC and handles the
+			communication between the system and the PPC card.
+			Two different versions are included. The old obsolete
+			one which was programmed in assembly and a brand new
+			one programmed mostly in C. The main difference is
+			speed (5%) and support for the Prometheus PCI bridge.
+InitPPC:		Initializes the PPC card using the powerpc.library
+GetInfo:		Simple program to show the state of the PPC CPU on the
+			PPC card after initialization.
+StartPPC:		Simple script if you don't want to put the library in
+			the Startup-Sequence.
+vdappc:			Program from Frank Wille that disassembles PPC code.
+			Main difference with the one already available on the
+			net is that this compiled version supports Altivec
+			disassembly.
+wosdb:			Program from Frank Wille that can trace through PPC
+			programs. Main difference with the one already
+			available on the net is that this compiled version can
+			intercept exceptions and trace from there. Original
+			program could only trace from the start of a program.
+			Thanks Frank!
+tools750x:		Various tools to under/overclock the PPC750FX as found
+			on the "Ragnarok" PrPMC800 card. Thanks to Wrangler!
+bogomips: 		Meaningless speed test program :-)
+			
+Also the sources from both versions are included.
+
+
+The Sonnet or PowerPMC card can only be initialized after the graphics card has
+been initialized. This means after C:LoadMonDrvs in the Startup-Sequence. To
+use it with WarpDT, it needs to be initialized before AddDataTypes in the
+Startup-Sequence. It is however recommended to start the driver from the
+workbench using the provided icon or using the provided script. The Harrier
+bridge based and Killer NIC cards can initialize their CPUs without the aid of
+VGA memory.
+
+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+The future:
+
+I consider the library as finished. Bug fixes will happen and maybe add PCIe
+card support. Currently it does not work fully on the Prometheus, but maybe it
+will on the Mediator MKIV in combination with pci.library 14.0. I do not see a
+reason to add memory protection as nothing out there uses it.
+
+I looked at an implementation of Nallepuh for Payback, but someone else can
+do that :-)
+
+It was a fun 9 year ride and thanks for your support! :-)
+
+
+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+What has changed since 17.15:
+
+- Added the ENV option ReportG4asG3. See above.
+- The ENV option SetCMemDiv was read but did nothing. Fixed. See above.
+- The ENV option EnMemExc replaces EnAlignExc and EnDAccessExc. See above.
+- Data Access (DSI) handlers can now claim a fault. Without EnMemExc they
+  now also get the faults the 68K memory access cannot serve, as in 17.13b.
+- Task priorities had no effect: tasks simply took turns. Added the WarpOS
+  priority scheduler (NEWPRIRULE), with NICE values and a time slice per task
+  that scales with the load.
+- Every exception restarted the time slice. The decrementer is now only set
+  after a decrementer or external interrupt, as in WarpOS.
+- Timed exception handlers (EXCATTR_TIME) could run up to 20 ms late. Fixed.
+- Exceptions now run under the library's own MMU set-up. A task's own BATs,
+  segment registers and page table are restored on exit.
+- The kernel now handles exceptions on its own stack, and exception handlers
+  get the full exception frame.
+- Fixed several bugs in calling exception handlers with a small context.
+- XCO_EXCID and XCO_R3 of the XCONTEXT structure were swapped. Fixed.
+- The kernel no longer dereferences a null or misaligned r3 on a system call
+  (sc) exception; such calls go to the registered handlers.
+- The tc_Switch and tc_Launch task hooks are now called.
+- Fixed the per-task CPU usage figures.
+- Reworked the signal relay between PPC tasks and their 68k mirror tasks.
+  Signals were lost or stranded, and signal bit 31 was stripped. Fixed.
+- SignalPPC() to a 68k process (rather than a task) did nothing. Fixed.
+- A task created with CreateTaskPPC() could hang in its first Run68K(), in a
+  race while its 68k mirror task was set up. Fixed.
+- WaitTime() cleared signals 0-9 as well as its own, in the task and in its
+  result. TrySemaphorePPC() could then fail after it had been given the
+  semaphore. Fixed.
+- 68k tasks lost bits 0 and 1 of tc_Flags when the library cleared its own
+  flag. Fixed.
+- The Harrier start-up switched off copy-back snarfing (BXCS bit CSE) when it
+  started the CPU. This hung a G4 (seen with ScummVM and GLQuake). Fixed.
+- With SetCPUComm set, hunks that asked for FAST or CHIP memory were not
+  loaded into Amiga memory. Fixed.
+- A 68k mirror task freed a borrowed current directory lock (e.g. the Shell's)
+  on exit. Fixed.
+- The dummy warp.library (now 5.2) is built in PPC memory, so PPC code can
+  call it.
+
+What has changed since 17.14:
+
+- Not enough room on the PPC MMU pagetable when Voodoo4/5 installed. Fixed.
+- FindSemaphorePPC searched the wrong list. Fixed.
+- Double freeing memory for semaphores fixed.
+- Added that the exception/crash output also goes to serial.
+- Added basic support for Bigfoot/Xeno Killer 2100 PCIe cards.
+- Added Altivec support for CopyMemPPC when available. Needs 128bit alignment.
+- Added NoZeroGuard as an ENV option. See above.
+- Changed description for ENV option SetCPUComm. See above.
+
+What has changed since 17.13b:
+
+- Rewritten all code in C. Startup code is still in assembly.
+- Added support for the Prometheus Bridge with FireStorm firmware. Needs
+  prometheus.library 4.0 or better (See EAB or contact me).
+- WARNING: Timings on the Prometheus seem not so tolerant. K1/M1 cards do not
+  work with the Prometheus and Warp3D (Bus errors).  
+- Added support for the Permedia2 PCI card (2D only).
+- Rewritten memory detection on the Harrier cards. No ENV needed anymore.
+  Up to 384MB supported.
+
+What has changed since 17.12:
+
+- Removed left-over debug code.
+- Added check on 128MB Harriers.
+- Added new ENV called Harrier256MB.
+- Fixed 256+MB G3 Harrier support.
+- Fixed an Enforcer hit.
+- Fixed a possible bug for cards with more than 256MB memory.
+- Clarified an error message.
+- Added an extra error regarding memory wrapping.
+- Fixed an error where the PPC memory size was saved wrongly.
+- Fixed PPCBase initialization by adding PPC_SysLib and PPC_DosLib values.
+- Added basic support for Mediator MKIII.
+
+What has changed since 17.11:
+
+- Library now requires pci.library 13.8+ from Elbox.
+- Added error output when a time-out occurs on 68K calling by the PPC.
+- Added more crash error messages (e.g. when PPC is out of memory).
+- Page table size now allocated based on total memory on card.
+- Fixed Quantum/time-slice not being set correctly by CreateTaskPPC.
+- Harrier cards now allocate memory based on available Z3 window space.
+- Fixed RemTailPPC returning LH_TAILPRED when list was empty.
+- Trying to send a signal to a non-existing 68k mirror task now prevented.
+- Data storage exceptions can now be intercepted correctly by wosdb debugger.
+- Added $5961 and $5962 to supported ATI Radeon cards.
+- Library now keeps track of number of Run68Ks called.
+- Updated the GetInfo utility with above info and also added 7457 CPU.
+- Added a message when the kernel crashes.
+- Added 3.5 and 4.0 multiplier for Rapture 7410 cards.
+- Overhauled the signalling system making DisSigBounce obsolete.
+- Added a Stricmp workaround for lha_wos 2.14 which apparently sorts using the
+  68k utility.library. Archiving now starts a lot faster.
+- Added a work-around to speed up WarpDT in combination with picture.datatype
+  version 45.17. (WarpDT needs the PPC card to be started from startup-
+  sequence).
+
+What has changed since 17.10:
+
+- Added support for Bigfoot Killer NIC K1 PCI cards.
+- Added access to Radeon config space for K1/M1 PPC cards.
+- Fixed reporting of L2 size for Killer NIC cards
+- Added experimental code to add pcidma memory for use by K1/M1 cards. This is
+  enabled when a Radeon is added as a secondary card.
+- PPC MMU now correctly initialized in case of 128MB(x2) Radeon.
+- Harrier based cards can use up to 384MB of local RAM for PPC programs when
+  enough room in Z3 space,
+- Fixed errors in MMU page table set-up code.
+- Fixed register trashing when Killer or Harrier present (code was executed
+  using MPC107 register offsets).
+- Now the whole 512MB mediator memory range gets mapped to the PPC.
+- K1 now has a correct decrementer interrupt going on. The time slice was
+  wrongly calculated resulting in occasional stalls of the PPC,
+
+
+What has changed since 17.9:
+
+- GetCPU() now correctly recognizes a Nitro CPU as a G4.
+- Added basic MPC7450 support (Gyrus X2 PMC card).
+- Added MPC7441, PPC603E to GetInfo tool.
+- Fixed an error in RunPPC that caused screen corruption (e.g. in Earth2140).
+- Fixed tearing of screens in some games (e.g. FreeSpace).
+- Added support for Bigfoot Killer NIC M1 PCI cards.
+
+
+What has changed since 17.8:
+
+- Added ENV DisSigBounce. If set signals are less likely to continuously bounce
+  between processors. This lessens the load on the PCI bus and can speed up
+  certain programs/games. Programs that use a lot of DSI emulations (like
+  scummvmwos 0.7) will hang. Turn this setting off when that happens.
+- Added Harrier chipset support. This will open up a range of support for PMC
+  cards based on this chipset. For now PrPMC800 has been tested and is
+  officially supported. Others have had success with the PrPMC8150 card.
+- Added more MHz options to the settings table. Up to 1GHz now supported.  
+
+What has changed since 17.7:
+
+- Fixed a memory leak. Stack of a PPC task was not freed.
+- LoadSeg() patch crashed on overlaid files. They are now ignored.
+- Added more error handling/messages.
+- SnoopTask() on exit was not implemented correctly. Fixed.
+- SnoopTask() should now work with SNOOP_START.
+- Implemented task exceptions from SetExceptPPC().
+- Small compatibility update regarding PPCBase (extended libbase).
+- Aligned data handling within the library to 16 byte boundaries (for Altivec).
+- Fixed a trashing of a segment pointer inside the LoadSeg() patch.
+- Extended LargeContext to hold Altivec registers.
+- Modules of WarpRace are now loaded correctly.
+- Added support for the Force Computers PowerPMC-250 450MHz G4 card,
+- Added CPUF_7410 for MPC7410 CPUs.
+- Added size detection code for SDRAM to the library.
+- Added option sonnet/EnStackPatch.
+
+What has changed since 17.6:
+
+- CauseInterrupt() and CausePPCInterrupt() now work as intended.
+- The option to enable a DSI exception handler now works as intended.
+- Removed a lot of special purpose register (SPRGx) usage.
+- Made several fixes to the init code when a Radeon is present.
+- Loading DefIcons no longers goes into a infinite loop due to LoadSeg() patch.
+- Added the ENV variable SetCMemDiv. Now you can set the speed of the L2 cache.
+- First hunk of WarpOS programs should now correctly be loaded to FAST RAM.
+- Made some tweaks to the AllocMem() patch.
+- Cybermand and Cyberpi now work correctly with hunk patch.
+- Fixed a memory leak. Stack of deleted PPC tasks was not freed.
+- LoadSeg() patch crashed on overlaid files. These are now ignored.
+
+
+What has changed since 17.5:
+
+- Fully working PP_STACKPTR and PP_STACKSIZE for Run68K().
+- Fixed typo in GetPPCState().
+- Added more error messages.
+- Fixed a bug in the scheduler. Removed tasks were not handled properly.
+- Added a memory clean-up task. Memory of removed tasks is now freed properly.
+- Added options through ENVARC:sonnet
+- Kernel now removes crashed tasks and continues instead of halting.
+- Length of context-switch structure was incorrect.
+- Completely rewrote all the exception handlers.
+- Added DSI, Decrementer and External Interrupt exception hooks.
+- Fixed an error in the custom handler code in case of small context used.
+- Register r3 was trashed when more than 1 custom handler present. Fixed.
+- Added option to force first hunk of WarpOS program to FAST memory by default.
+- LoadSeg patch now correctly handles bit 30 of HUNK_SIZE (move to CHIP).
+- Sometimes PPC code was loaded into FAST RAM through the LoadSeg patch. Fixed.
+- Mediator config jumper can now be in ANY position for the sonnet to work.
+- AllocMem() patch now correctly handles CLI names.
+- FreeSpace movies now play at full speed.
+
+What has changed since 17.4:
+
+- Fixed a bug in the FPU opcode detection in the Alignment handler.
+- Fixed various Enforcer hits on the 68K side.
+- Stack transfer limit 68K->PPC of 164 bytes removed (RunPPC).
+- Basic stack transfer support added to Run68K().
+- Added support for Radeon with VendorID $5964.
+- Added a PPC memory test. This is run during memory initialization.
+- Added a timeout for the PPC to report back during initialization.
+- Added checks on the SwapConfig and WindowSize jumpers of the mediator.
+- Added experimental AltiVec support.
+- Added powerpc.library to distribution. See notes above.
+
+What has changed since 17.3:
+
+- Fixed a few more potential hangs with well placed syncs.
+- GetInfo() now recognizes modded 433/466/533 MHz Cards.
+- Z flag of 68K interrupt now handled correctly upon exit interrupt.
+- User code no longer addresses the zero page. That is now Supervisor only.
+- Kernel and graphics memory are now handled by BATs by default.
+- L2 cache can now cache instructions, not only data.
+- L2 cache now set to 200MHz for 400/1MB version instead of 133MHz.
+- Fixed a bug in GetHALInfo().
+- Fixed a bug where inter-CPU messages were duplicated.
+- Inter-CPU messages can now be up to ~64K in size instead of 150 bytes.
+- Other miscelaneous fixes to increase stabilty and speed.
+
+What has changed since 17.0:
+
+- Moved all patches inside the library, no more different start-up programs.
+- Implemented PPF_ASYNC/PP_STACKPTR/PP_STACKSIZE for RunPPC().
+- Fixed a bug in CreatePPCTask(). Now APDF works.
+- Added better error handling through pop-up windows/requesters.
+- Added a ramlib patch to increase stack when needed.
+- Fixed the TagItem functions. Now more demos from Mad Wizards started working.
+- Fixed a bug in GetInfo that was masked by the bug in the TagItem functions.
+- Added shared signal system. Now the signals are shared by the 2 processors.
+- Fixed LockTaskList function. Wrong result was returned.
+- Added CPUUSage, Busy, Activity, CPU Load and System load code (for WarpStat).
+- Fixed a bug in DeleteTaskPPC() as the Snoop list was not correctly freed.
+- Fixed a bug in PutXMsg(). WES should work now (albeit slow).
+- Added alignment support to AllocVecPPC(); For iFusion..No that does not work.
+- Fixed a missing opcode in the FPU alignment emulation code. Now Q1A works.
+- Other miscelaneous fixes and optimizations.
+

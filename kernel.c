@@ -412,18 +412,28 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
         case VEC_DATASTORAGE:
         {
             /*
-             * STANDARD WarpOS ORDER: the task's DACCESS handlers see the fault
-             * first (powerpc.p:4222 queues them on PPC_EXC_DSI, which the DSI
-             * path walks before anything else), and EXCRETURN_ABORT claims it.
-             * The 68k proxy below is this platform's own -- the PPC cannot reach
-             * Amiga memory -- and runs only when no handler claimed the fault;
-             * iFUSION's handlers return NORMAL when no guest is running.
-             * sonnet/EnDAccessExc, which used to gate the handlers, is no longer
-             * read here. FIXES.md "THE LIBRARY HALF OF R", 24 Oct 2026.
+             * ENV:sonnet/EnMemExc DECIDES WHO SEES THE FAULT FIRST (the user's,
+             * 31 Oct 2026; it replaces sonnet/EnDAccessExc). A DSI here is a
+             * real fault or the PPC reaching Amiga memory, which it cannot do
+             * itself and the 68k proxy below serves. WarpOS reaches Amiga
+             * memory directly, so all its DSIs are real faults and its
+             * handlers see every one (Exception3, powerpc.p:5934-6010).
+             * - 1 (pp_EnDAccessExc set): the task's DACCESS handlers first, as
+             *   WarpOS; EXCRETURN_ABORT claims the fault, NORMAL leaves it to
+             *   the proxy. ReFused needs this for its guest's device accesses.
+             * - 0, the default: the proxy first, and the handlers only for
+             *   what it refuses, at the end of this arm -- 17.13b's default
+             *   (src_173b/setupppc.p:5370-5372, .HaltDSI :5760-5765).
+             * 17.15 called them only under EnDAccessExc and ignored their
+             * answer; from 24 to 31 Oct they ran first on every DSI.
+             * FIXES.md "EnMemExc".
              */
-            if (CommonExcHandler(PowerPCBase, iframe, (struct List*)&PowerPCBase->pp_ExcDAccess) == EXCRETURN_ABORT)
+            if (PowerPCBase->pp_EnDAccessExc)
             {
-                break;
+                if (CommonExcHandler(PowerPCBase, iframe, (struct List*)&PowerPCBase->pp_ExcDAccess) == EXCRETURN_ABORT)
+                {
+                    break;
+                }
             }
             if ((iframe->if_Context.ec_DAR == 4) || ((iframe->if_Context.ec_DAR < 0xfffff800) && (iframe->if_Context.ec_DAR > 0x800)))
             {
@@ -490,6 +500,16 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                         //PowerPCBase->pp_Quantum = getDEC() + 1000; //Do not start quantum all over
                         break;
                     }
+                }
+            }
+            if (!(PowerPCBase->pp_EnDAccessExc))
+            {
+                /* EnMemExc 0: what the proxy refused -- outside its range, from
+                 * an SRR0 at or below 0x10000, or an instruction DoDataStore
+                 * cannot emulate -- reaches the handlers before the crash. */
+                if (CommonExcHandler(PowerPCBase, iframe, (struct List*)&PowerPCBase->pp_ExcDAccess) == EXCRETURN_ABORT)
+                {
+                    break;
                 }
             }
             CommonExcError(PowerPCBase, iframe);

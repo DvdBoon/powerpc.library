@@ -1344,27 +1344,33 @@ ULONG doENV(struct InternalConsts* myConsts, UBYTE* envstring)
 
 void getENVs(struct InternalConsts* myConsts)
 {
+    ULONG memExc;
+
     myConsts->ic_env1 = 0;
     myConsts->ic_env2 = 0;
     myConsts->ic_env3 = 0;
     myConsts->ic_env4 = 0;
 
+    /* ONE SWITCH FOR BOTH MEMORY-ACCESS EXCEPTIONS, the user's (31 Oct 2026).
+     * sonnet/EnMemExc replaces sonnet/EnAlignExc and sonnet/EnDAccessExc, and
+     * the powerpc/EnAlignExc this also read until today; nothing in this
+     * library reads ENV:powerpc/ any more. It fills both bytes the two used,
+     * so setupppc.c still unpacks pp_EnAlignExc from env1 and pp_EnDAccessExc
+     * from env2. 1 hands alignment and data access exceptions to the
+     * registered handlers first, as WarpOS does (whose own switch is
+     * env:powerpc/EnAlignExc, warpos/warpos/powerpc.s:6684); 0, the default,
+     * lets the library emulate the access and the 68k proxy serve it first.
+     * kernel.c VEC_ALIGNMENT and VEC_DATASTORAGE; FIXES.md "EnMemExc". */
+    memExc = doENV(myConsts,"sonnet/EnMemExc");
+
     myConsts->ic_env1 |= (doENV(myConsts,"sonnet/EnEDOMem") << 24);
     myConsts->ic_env1 |= (doENV(myConsts,"sonnet/Debug") << 16);
-    /* Also honour the powerpc/ namespace for this one. iFUSION reads
-     * powerpc/EnAlignExc itself and refuses to start without it, then relies
-     * on alignment exceptions reaching the handler it registered. It is this
-     * bit that decides that: with it clear the VEC_ALIGNMENT arm in kernel.c
-     * fixes the access up silently through DoAlign and no registered handler
-     * ever sees it. Honouring only sonnet/ would let a user satisfy iFUSION
-     * while leaving the behaviour it depends on switched off. */
-    myConsts->ic_env1 |= ((doENV(myConsts,"sonnet/EnAlignExc") |
-                           doENV(myConsts,"powerpc/EnAlignExc")) << 8);
+    myConsts->ic_env1 |= (memExc << 8);
     myConsts->ic_env1 |= doENV(myConsts,"sonnet/DisL2Cache");
 
     myConsts->ic_env2 |= (doENV(myConsts,"sonnet/DisL2Flush") <<24);
     myConsts->ic_env2 |= (doENV(myConsts,"sonnet/EnPageSetup") << 16);
-    myConsts->ic_env2 |= (doENV(myConsts,"sonnet/EnDAccessExc") << 8);
+    myConsts->ic_env2 |= (memExc << 8);
     myConsts->ic_env2 |= doENV(myConsts,"sonnet/SetCMemDiv");
 
     myConsts->ic_env3 |= (doENV(myConsts,"sonnet/DisHunkPatch") <<24);
@@ -2163,6 +2169,14 @@ struct InitData* SetupHarrier(struct InternalConsts* myConsts, ULONG devfuncnum,
 
     CacheClearU();
 
+    /* RELEASE THE CPU: clear P0H, processor 0 hold-off, and nothing else.
+     * BXCS is the Harrier's Bridge PowerPC Control and Status Register
+     * (Harrier programmer's guide, 3-41..3-43). The one writable bit below
+     * P0H is CSE, copy-back snarfing, which resets to 1. Until 31 Oct 2026
+     * the bare mask 1<<20 made this line clear bits 0-20, so it switched
+     * snarfing off, and a G4 (7410) on a Harrier board then hung in ScummVM
+     * and GLQuake where a G3 did not. 17.13b cleared bit 20 alone (bclr,
+     * src_173b/powerpc.s:1224). FIXES.md "THE BIT IS CSE". */
     value = readmemL(configBase, XCSR_BXCS);
     value &= ~XCSR_BXCS_BP0H;
     writememL(configBase, XCSR_BXCS, value);
