@@ -212,6 +212,9 @@ What has changed since 17.15:
   flag. Fixed.
 - The Harrier start-up switched off copy-back snarfing (BXCS bit CSE) when it
   started the CPU. This hung a G4 (seen with ScummVM and GLQuake). Fixed.
+- Every exception emptied the PPC instruction cache, which made exceptions
+  about three times slower on a G4 (the G4's L2 cache is not on the chip).
+  The cache is now only emptied when another task gets the CPU.
 - With SetCPUComm set, hunks that asked for FAST or CHIP memory were not
   loaded into Amiga memory. Fixed.
 - A 68k mirror task freed a borrowed current directory lock (e.g. the Shell's)
