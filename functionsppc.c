@@ -2474,6 +2474,21 @@ PPCFUNCTION VOID myGetInfo(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
             {
                 case GETINFO_CPU:
                 {
+                    /* ENV:sonnet/ReportG4asG3 (LIB_FLAGPPC_RG3; forced on
+                     * in the G4-as-G3 test build): every G4 is a G3.
+                     * G4_GETINFO_G3: THIS answer alone says G3 -- the one
+                     * SDL_HasAltiVec() asks on WarpOS -- while GetCPU and
+                     * GETINFO_PVR still say G4. FIXES.md "THE GETINFO-G3
+                     * VARIANT", 29 Oct 2026. */
+#ifdef G4_GETINFO_G3
+                    if (PVR_IS_G4(PowerPCBase->pp_CPUInfo))
+#else
+                    if ((PowerPCBase->pp_PowerPCBase.PPC_Flags & LIB_FLAGPPC_RG3) && PVR_IS_G4(PowerPCBase->pp_CPUInfo))
+#endif
+                    {
+                        myTagItem->ti_Data = CPUF_G3;
+                        break;
+                    }
                     switch (PowerPCBase->pp_DeviceID)
                     {
                         case DEVICE_MPC8343E:
@@ -2524,7 +2539,15 @@ PPCFUNCTION VOID myGetInfo(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
                 }
                 case GETINFO_PVR:
                 {
-                    myTagItem->ti_Data = PowerPCBase->pp_CPUInfo;
+                    if (PowerPCBase->pp_PowerPCBase.PPC_Flags & LIB_FLAGPPC_RG3)
+                    {
+                        /* ENV:sonnet/ReportG4asG3: a G4 answers a 750's PVR */
+                        myTagItem->ti_Data = PVR_AS_G3(PowerPCBase->pp_CPUInfo);
+                    }
+                    else
+                    {
+                        myTagItem->ti_Data = PowerPCBase->pp_CPUInfo;
+                    }
                     break;
                 }
                 case GETINFO_ICACHE:
@@ -2903,6 +2926,13 @@ PPCFUNCTION VOID myCopyMemPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
     args.db_Arg[2] = size;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
+#ifdef G4_NO_VMX_COPY
+    /* THE NO-VMX-COPY TEST BUILD (build.ps1 -G4VecOnNoVmx; FIXES.md "THE
+     * VEC-ON NO-VMX-COPY VARIANT", 29 Oct 2026): the plain copy always, so
+     * CopyMemQuickVMX -- whose only caller is below -- never runs. */
+    CopyMemQuickPPC(PowerPCBase, source, dest, size);
+    return;
+#endif
     if (PowerPCBase->pp_EnAltivec)
     {
         if (PowerPCBase->pp_ExceptionMode)

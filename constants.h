@@ -30,6 +30,11 @@
 #define LIB_FLAGPPC_SCC         0x4
 #define LIB_FLAGPPC_ESP         0x2
 #define LIB_FLAGPPC_NZG         0x1
+/* ENV:sonnet/ReportG4asG3 (31 Oct 2026): report every G4 as a G3 and never
+ * enable AltiVec. Bit 7: WarpOS itself uses only LIBB_DELEXP (bit 3) of
+ * PPC_Flags, and values 2-7 of the four options above reach only bits 0-5
+ * through the packing in libinit.c. */
+#define LIB_FLAGPPC_RG3         0x80
 
 #define PPC_VECLEN              3           //Number of instructions of VecEntry (setupppc.s)
 #define NUM_OF_68K_FUNCS        49
@@ -55,7 +60,7 @@
 #define TASKATTR_PRIVATE        0x80100011
 
 #define EXCATTR_TIMEDREMOVAL    0x80101007
-#define EXCF_DECREMENTER        1<<9
+#define EXCF_DECREMENTER        (1<<9)
 #define PPC_VECLEN              3
 #define OPCODE_LEN              4
 #define OPCODE_NOP              0x60000000
@@ -103,9 +108,24 @@
 #define CPUF_7410               0x00800000
 #define CPUF_7400               0x00400000
 
+/* Used by ENV:sonnet/ReportG4asG3 (LIB_FLAGPPC_RG3): with it set, every G4
+ * is reported as a G3 and AltiVec is never enabled. The G4-as-G3 test build
+ * (build.ps1 -G4AsG3; FIXES.md "THE G4-AS-G3 TEST BUILD", 29 Oct 2026) now
+ * just forces that flag on (libinit.c); its second variant adds
+ * G4_KEEP_ALTIVEC (build.ps1 -G4AsG3Vmx): the same reports, the library's
+ * AltiVec as in the normal build. G4_GETINFO_G3 (build.ps1 -G4VecOnInfoG3)
+ * uses PVR_IS_G4 for GETINFO_CPU alone; see functionsppc.c. The G4 PVRs,
+ * upper half: 0x000C 7400, 0x800C 7410, and 0x8000..0x8004 the 7450 family
+ * (7441/7451, 7445/7455, 7447/7457, 7447A, 7448). 0x8083, the e300 core, is
+ * not one. */
+#define PVR_IS_G4(p)    ((((p) >> 16) == 0x000C) || (((p) >> 16) == 0x800C) \
+                         || ((((p) >> 16) >= 0x8000) && (((p) >> 16) <= 0x8004)))
+/* What GETINFO_PVR answers for a G4: a 750's version, the real revision. */
+#define PVR_AS_G3(p)    (PVR_IS_G4(p) ? (0x00080000 | ((p) & 0xFFFF)) : (p))
+
 #define TS_ATOMIC               8
 
-#define SIGF_WAIT               1<<10
+#define SIGF_WAIT               (1<<10)
 #define SYS_SIGALLOC            0x0000FFFF
 
 /* powerpc.p:32 "DEVIATION = 100". The timer sweep treats a deadline within
@@ -167,7 +187,7 @@
 #define VEC_THERMAL             0x1700
 
 #define EXCB_ALTIVECUNAV        10          //Is normally reserved for implementation specific exceptions
-#define EXCF_ALTIVECUNAV        1<<10
+#define EXCF_ALTIVECUNAV        (1<<10)
 
 #define ID_PPC                  0x5F505043
 #define ID_TPPC                 0x54505043
@@ -214,7 +234,7 @@
 #define MEMF_PPC                (1L<<13)
 #define MMUF_BAT                (1L<<1)
 #define MEM_GAP                 0x410000
-#define TF_PPC                  1<<2
+#define TF_PPC                  (1<<2)
 #define VENDOR_ELBOX            0x89e
 #define MEDIATOR_MKII           33
 #define MEDIATOR_1200TX         60
@@ -232,8 +252,8 @@
 #define PCI_OFFSET_COMMAND      4
 #define DEVICENUMBER_SHIFT      3
 #define BUSNUMBER_SHIFT         8
-#define BUSMASTER_ENABLE        1<<2
-#define MEMORYSPACE_ENABLE      1<<1
+#define BUSMASTER_ENABLE        (1<<2)
+#define MEMORYSPACE_ENABLE      (1<<1)
 
 #define DEVICE_MPC107           0x0004
 #define VENDOR_MOTOROLA         0x1057
@@ -397,7 +417,16 @@
 #define	   PSL_RI	  0x00000002  /* ..6. recoverable interrupt */
 #define	   PSL_LE	  0x00000001  /* ..6. endian mode (1 == le) */
 
+#ifdef G4_FORCE_VEC
+/* THE VEC-ON TEST BUILD (build.ps1 -G4AsG3VecOn; FIXES.md "THE VEC-ON
+ * VARIANT", 29 Oct 2026). G4 ONLY. Every new task starts with AltiVec on, so
+ * the vector save and restore in _StoreFrame/_LoadFrame (gated on SRR1's VEC
+ * bit) run at every exception of every task, instead of only after a task's
+ * first AltiVec instruction. */
+#define MACHINESTATE_DEFAULT    PSL_IR|PSL_DR|PSL_FP|PSL_PR|PSL_EE|PSL_ME|PSL_VEC
+#else
 #define MACHINESTATE_DEFAULT    PSL_IR|PSL_DR|PSL_FP|PSL_PR|PSL_EE|PSL_ME
+#endif
 
 // general BAT defines for bit settings to compose BAT regs
 // represent all the different block lengths
@@ -634,7 +663,7 @@
 #define XCSR_SDGC_ENRV_ENA      0x00800000
 #define XCSR_SDTC_DEFAULT       0x07130000
 #define XCSR_BXCS_P0H_ENA       0x00100000
-#define XCSR_BXCS_BP0H          1<<20
+#define XCSR_BXCS_BP0H          (1<<20)
 #define XCSR_MBAR_ENA           0x00010000
 #define XCSR_XARB_ENA           0x00010000
 #define XCSR_XARB_PRKCPU0       0x00200000

@@ -826,6 +826,23 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
     PowerPCBase->PPC_SegList = (APTR)seglist;
     PowerPCBase->PPC_Flags   = (UBYTE)((myConsts->ic_env3 >> 21) | (myConsts->ic_env3 >> 14) | (myConsts->ic_env3 >> 7) | myConsts->ic_env3);
 
+    /*
+     * ENV:sonnet/ReportG4asG3: every G4 reported as a G3, AltiVec never
+     * enabled. Unset, the library is as before: AltiVec switched on per task
+     * through the AltiVec Unavailable exception. The PPC reads the flag in
+     * setupPPC (setupppc.c, pp_EnAltivec) -- safe because it is set here,
+     * before zp_PowerPCBase (below) and before MasterControl releases the
+     * PPC (zp_Status = STATUS_INIT, support68k.c). The G4-as-G3 test build
+     * forces it on.
+     */
+    if (myConsts->ic_env4 >> 24)
+    {
+        PowerPCBase->PPC_Flags |= LIB_FLAGPPC_RG3;
+    }
+#ifdef G4_AS_G3
+    PowerPCBase->PPC_Flags |= LIB_FLAGPPC_RG3;
+#endif
+
     myPPCBase = PowerPCBase;
 
     struct PrivatePPCBase* myBase = (struct PrivatePPCBase*)PowerPCBase;
@@ -1330,6 +1347,7 @@ void getENVs(struct InternalConsts* myConsts)
     myConsts->ic_env1 = 0;
     myConsts->ic_env2 = 0;
     myConsts->ic_env3 = 0;
+    myConsts->ic_env4 = 0;
 
     myConsts->ic_env1 |= (doENV(myConsts,"sonnet/EnEDOMem") << 24);
     myConsts->ic_env1 |= (doENV(myConsts,"sonnet/Debug") << 16);
@@ -1353,6 +1371,10 @@ void getENVs(struct InternalConsts* myConsts)
     myConsts->ic_env3 |= (doENV(myConsts,"sonnet/SetCPUComm") << 16);
     myConsts->ic_env3 |= (doENV(myConsts,"sonnet/EnStackPatch") << 8);
     myConsts->ic_env3 |= doENV(myConsts,"sonnet/NoZeroGuard");
+
+    /* 31 Oct 2026: the twelve bytes above are all taken. This one reaches
+     * both CPUs as LIB_FLAGPPC_RG3 in PPC_Flags, not through InitData. */
+    myConsts->ic_env4 |= (doENV(myConsts,"sonnet/ReportG4asG3") << 24);
     return;
 }
 /********************************************************************************************

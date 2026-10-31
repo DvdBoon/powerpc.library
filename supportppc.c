@@ -871,6 +871,12 @@ PPCFUNCTION VOID SetupRunPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
 
 PPCFUNCTION VOID StartTask(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct MsgFrame* myFrame)
 {
+#ifdef G4_EARLY_VEC
+    /* The early-VEC test: the task's switch-on happens here, first thing,
+     * instead of at its first aligned CopyMemPPC -- SetupRunPPC's own copy
+     * just below, realloc, or Run68K's argument copy. */
+    vecProbe();
+#endif
     SetupRunPPC(PowerPCBase, myFrame);
 
     struct TaskPPC* myTask = PowerPCBase->pp_ThisPPCProc;

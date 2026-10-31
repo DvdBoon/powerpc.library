@@ -79,6 +79,14 @@ ULONG   GetVecEntry(void);
 ULONG SystemCall(APTR)                    = "\tsc\n";
 ULONG getLeadZ(ULONG value)               = "\tcntlzw\tr3,r3\n";
 ULONG getPVR(void)                        = "\tmfpvr\tr3\n";
+#ifdef G4_EARLY_VEC
+/* THE EARLY-VEC TEST BUILD (build.ps1 -G4EarlyVec; FIXES.md "THE EARLY-VEC
+ * VARIANT", 29 Oct 2026). vor v0,v0,v0 as a raw word, so it needs no AltiVec
+ * mnemonics from the assembler. It changes nothing, and with VEC still off it
+ * takes the AltiVec Unavailable exception: the per-task switch-on, at a place
+ * of the library's choosing. 7400/7410 ONLY. */
+VOID vecProbe(void)                       = "\t.long\t0x10000484\n";
+#endif
 ULONG getSDR1(void)                       = "\tmfsdr1\tr3\n";
 void  setSDR1(ULONG value)                = "\tmtsdr1\tr3\n";
 void  setIABR(ULONG value)                = "\tmtspr\t1010,r3\n";

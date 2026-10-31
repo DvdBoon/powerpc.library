@@ -584,6 +584,13 @@ LIBFUNC68K ULONG myGetCPU(__reg("a6") struct PrivatePPCBase* PowerPCBase)
 {
     UWORD cpuType = PowerPCBase->pp_CPUInfo >> 16;
 
+    /* ENV:sonnet/ReportG4asG3 (and the G4-as-G3 test build, which forces
+     * the flag): every G4 is a G3. */
+    if ((PowerPCBase->pp_PowerPCBase.PPC_Flags & LIB_FLAGPPC_RG3) && PVR_IS_G4(PowerPCBase->pp_CPUInfo))
+    {
+        return (CPUF_G3);
+    }
+
     switch (cpuType)
     {
         case 0x7000:

@@ -123,6 +123,7 @@ ULONG                   ic_deviceID;
 ULONG                   ic_env1;
 ULONG                   ic_env2;
 ULONG                   ic_env3;
+ULONG                   ic_env4;    /* sonnet/ReportG4asG3 << 24; 68k only */
 UWORD                   ic_gfxType;
 UWORD                   ic_gfxSubType;
 UWORD                   ic_pciType;

@@ -38,6 +38,18 @@ _ExcCommon:
         b       ExcDStoreTLBMiss
 
         mtsprg2 r0                                         #LR; sprg3 = r0
+.ifdef G4_DSSALL
+#       THE DSSALL TEST BUILD (build.ps1 -G4Dssall; FIXES.md "THE DSSALL TEST
+#       BUILD", 29 Oct 2026). G4 ONLY: dssall is an illegal instruction on a G3.
+#       Every AltiVec data stream the interrupted task started is stopped here,
+#       before the MMU switch below (the library's BATs, then its sixteen
+#       segment registers), so none keeps prefetching under the library's
+#       mappings or the next task's. No counterpart in WarpOS, which has no
+#       AltiVec instruction at all, and whose exception path switches no MMU
+#       (warp.p:3455-3459). dssall needs no MSR[VEC] and touches no register.
+        dssall
+        sync
+.endif
 .ifdef EXC_TIMING
         mftb    r0                                         #T0 entry, untranslated
         stw     r0,ZP_TIME_T0(r0)

@@ -614,6 +614,7 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
     ULONG num = 0;
     ULONG pll, l2Size, l2Setting;
     struct CacheSize cz;
+    UBYTE l2Programmed = 0;     /* this function set up an external L2's clock */
 
     switch (PowerPCBase->pp_DeviceID)
     {
@@ -672,6 +673,7 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
 
                 setL2CR(l2Setting);
                 l2Size = cz.cz_SizeBytes;
+                l2Programmed = 1;
 
                 pll = value1 >> 28;
 
@@ -740,6 +742,7 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
 
             setL2CR(l2Setting);
             l2Size = cz.cz_SizeBytes;
+            l2Programmed = 1;
 
             ULONG* pllTable;
             pll = value1 >> 28;
@@ -763,6 +766,48 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
                 num +=2;
             }
             break;
+        }
+    }
+
+    /*
+     * ENV:sonnet/SetCMemDiv, the L2 clock divider: read since 17.3b, never
+     * used by the C library until 31 Oct 2026. As 17.3b's setupppc.p
+     * :1308-1343 does it, after the CPU speed: 1, 2, 3, 4 replace the /3
+     * programmed above with /1, /1.5, /2, /2.5 in L2CR, the L2 still
+     * enabled; 0 and 5 (and 6, 7) keep /3. 17.3b's default also clocked a
+     * 400 MHz CPU with 1 MB of L2 at /2 (:1331-1338); that is left out, so
+     * an unset variable changes nothing. Only where this function set up an
+     * external L2 itself: 17.3b also wrote L2CR on a 750FX or 745x, whose L2
+     * is on the chip. An if/else chain, not a switch: this function lives
+     * in .setupppc (PPCSETUP) and a jump table would not.
+     */
+    if (l2Programmed)
+    {
+        UBYTE memDiv = (UBYTE)initData->id_Environment2;
+        ULONG l2Clock = 0;
+
+        if (memDiv == 1)
+        {
+            l2Clock = L2CR_L2CLK_1;
+        }
+        else if (memDiv == 2)
+        {
+            l2Clock = L2CR_L2CLK_1_5;
+        }
+        else if (memDiv == 3)
+        {
+            l2Clock = L2CR_L2CLK_2;
+        }
+        else if (memDiv == 4)
+        {
+            l2Clock = L2CR_L2CLK_2_5;
+        }
+
+        if (l2Clock)
+        {
+            l2Setting &= ~L2CR_L2CLK_3;
+            l2Setting |= l2Clock;
+            setL2CR(l2Setting);
         }
     }
 
@@ -985,7 +1030,20 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
         {
             if ((PowerPCBase->pp_CPUInfo >> 16 & 0xfff) == 0xc)
             {
-                PowerPCBase->pp_EnAltivec = -1;
+#ifndef G4_KEEP_ALTIVEC
+                if (!(PowerPCBase->pp_PowerPCBase.PPC_Flags & LIB_FLAGPPC_RG3))
+#endif
+                {
+                    PowerPCBase->pp_EnAltivec = -1;
+                }
+                /* With ENV:sonnet/ReportG4asG3 (LIB_FLAGPPC_RG3, set by the
+                 * 68k before it hands this base over; forced on in the
+                 * G4-as-G3 test build) it stays 0, and that is every AltiVec
+                 * path: kernel.c's AltiVec-unavailable case refuses, so no
+                 * task gets PSL_VEC, so kernel.s never saves or restores a
+                 * vector register, and CopyMemPPC copies without AltiVec.
+                 * G4_KEEP_ALTIVEC, that build's second variant, sets it
+                 * regardless. */
             }
             break;
         }
@@ -1020,7 +1078,20 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
             }
             if ((PowerPCBase->pp_CPUInfo >> 16 & 0xfff) == 0xc)
             {
-                PowerPCBase->pp_EnAltivec = -1;
+#ifndef G4_KEEP_ALTIVEC
+                if (!(PowerPCBase->pp_PowerPCBase.PPC_Flags & LIB_FLAGPPC_RG3))
+#endif
+                {
+                    PowerPCBase->pp_EnAltivec = -1;
+                }
+                /* With ENV:sonnet/ReportG4asG3 (LIB_FLAGPPC_RG3, set by the
+                 * 68k before it hands this base over; forced on in the
+                 * G4-as-G3 test build) it stays 0, and that is every AltiVec
+                 * path: kernel.c's AltiVec-unavailable case refuses, so no
+                 * task gets PSL_VEC, so kernel.s never saves or restores a
+                 * vector register, and CopyMemPPC copies without AltiVec.
+                 * G4_KEEP_ALTIVEC, that build's second variant, sets it
+                 * regardless. */
             }
             break;
         }
