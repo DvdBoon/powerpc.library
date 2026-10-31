@@ -419,21 +419,30 @@ ULONG readmemLongPPC(ULONG Base, ULONG offset);
 #endif
 
 
+/* Each is one statement (do { } while (0)), so an unbraced if or else takes
+ * all four calls, and (address) cannot be split by whatever expression is
+ * passed. 31 Oct 2026; every call so far was safe without either. */
 #define writePCI(address, value) \
-        storePCI(CONFIG_ADDR, 0, CMD_BASE | address); \
+    do { \
+        storePCI(CONFIG_ADDR, 0, CMD_BASE | (address)); \
         sync();                                 \
         storePCI(CONFIG_DAT, 0, value); \
-        sync();
+        sync();                                 \
+    } while (0)
 
 #define writePCI16(address, value) \
-        storePCI(CONFIG_ADDR, 0, CMD_BASE | address); \
+    do { \
+        storePCI(CONFIG_ADDR, 0, CMD_BASE | (address)); \
         sync();                                 \
         storePCI16(CONFIG_DAT, 0, value); \
-        sync();
+        sync();                                 \
+    } while (0)
 
 #define writePCI8(address, value) \
-        storePCI(CONFIG_ADDR, 0, CMD_BASE | address); \
+    do { \
+        storePCI(CONFIG_ADDR, 0, CMD_BASE | (address)); \
         sync();                                 \
-        storePCI8(CONFIG_DAT | (address & 0x3), 0, value); \
-        sync();
+        storePCI8(CONFIG_DAT | ((address) & 0x3), 0, value); \
+        sync();                                 \
+    } while (0)
 

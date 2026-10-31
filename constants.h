@@ -40,7 +40,7 @@
 #define NUM_OF_68K_FUNCS        49
 #define NUM_OF_PPC_FUNCS        102
 #define TOTAL_FUNCS             (NUM_OF_68K_FUNCS+NUM_OF_PPC_FUNCS)
-#define NEGSIZE                 TOTAL_FUNCS*6
+#define NEGSIZE                 (TOTAL_FUNCS*6)
 #define NEGSIZEALIGN            ((NEGSIZE + 3) & -4)
 #define MSGLEN                  192
 #define SUPERKEY                0xABADBEEF
@@ -221,7 +221,7 @@
 #define SIZE_HFIFO              0x40000
 #define SIZE_SFIFO              0x4000
 #define FIFO_OFFSET             0x380000
-#define FIFO_END                FIFO_OFFSET + (4 * SIZE_KFIFO)
+#define FIFO_END                (FIFO_OFFSET + (4 * SIZE_KFIFO))
 
 #define HW_SETDEBUGMODE         12          //Private
 #define HW_PPCSTATE             13          //Private
@@ -423,9 +423,9 @@
  * the vector save and restore in _StoreFrame/_LoadFrame (gated on SRR1's VEC
  * bit) run at every exception of every task, instead of only after a task's
  * first AltiVec instruction. */
-#define MACHINESTATE_DEFAULT    PSL_IR|PSL_DR|PSL_FP|PSL_PR|PSL_EE|PSL_ME|PSL_VEC
+#define MACHINESTATE_DEFAULT    (PSL_IR|PSL_DR|PSL_FP|PSL_PR|PSL_EE|PSL_ME|PSL_VEC)
 #else
-#define MACHINESTATE_DEFAULT    PSL_IR|PSL_DR|PSL_FP|PSL_PR|PSL_EE|PSL_ME
+#define MACHINESTATE_DEFAULT    (PSL_IR|PSL_DR|PSL_FP|PSL_PR|PSL_EE|PSL_ME)
 #endif
 
 // general BAT defines for bit settings to compose BAT regs
@@ -839,7 +839,7 @@
 #define PICR1_FLASH_WR_EN          0x00001000
 #define PICR1_CF_LBA_EN            0x00002000
 #define PICR1_PROC_TYPE_7XX        0x00040000
-#define MPC107_PICR1_DEFAULT       PICR1_SPEC_PCI|PICR1_CF_APARK|PICR1_CF_LOOP_SNOOP|PICR1_ST_GATH_EN|PICR1_TEA_EN|PICR1_MCP_EN|PICR1_FLASH_WR_EN|PICR1_PROC_TYPE_7XX
+#define MPC107_PICR1_DEFAULT       (PICR1_SPEC_PCI|PICR1_CF_APARK|PICR1_CF_LOOP_SNOOP|PICR1_ST_GATH_EN|PICR1_TEA_EN|PICR1_MCP_EN|PICR1_FLASH_WR_EN|PICR1_PROC_TYPE_7XX)
 
 #define MPC107_PICR2               0xAC         //Processor Interface Configuration register 2
 #define PICR2_CF_LBCLAIM_WS        0x00000600
@@ -856,5 +856,5 @@
 #define PMCR1_NO_SLEEP_MSG         0x4000
 #define PMCR1_NO_NAP_MSG           0x8000
 #define PMCR1_NO_MSG               0xC000
-#define MPC107_PMCR1_DEFAULT       PMCR1_DOZE|PMCR1_BR1_WAKE|PMCR1_LP_REF_EN|PMCR1_NO_MSG
+#define MPC107_PMCR1_DEFAULT       (PMCR1_DOZE|PMCR1_BR1_WAKE|PMCR1_LP_REF_EN|PMCR1_NO_MSG)
 
