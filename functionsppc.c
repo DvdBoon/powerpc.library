@@ -1093,8 +1093,8 @@ PPCFUNCTION VOID myReleaseSemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerP
                         {
                             myWait = nxtWait;
                             nxtWait = (struct SemWait*)myWait->sw_Node.mln_Succ;
-
-                            if ((ULONG)myWait->sw_Task & SM_SHARED)
+                            //no successor: the list's tail marker, whose "sw_Task" is ss_MultipleLink -- stop, as 17.13b's .link31 (FIXES.md "CODE REVIEW OF lib/", #2)
+                            if ((nxtWait) && ((ULONG)myWait->sw_Task & SM_SHARED))
                             {
                                 sigTask = (struct TaskPPC*)((ULONG)myWait->sw_Task & ~SM_SHARED);
                                 myRemovePPC(PowerPCBase, (struct Node*)myWait);
