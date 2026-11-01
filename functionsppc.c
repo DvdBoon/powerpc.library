@@ -667,6 +667,7 @@ PPCFUNCTION struct TaskPPC* myCreateTaskPPC(__reg("r3") struct PrivatePPCBase* P
             FreeVec68K(PowerPCBase, newTask);
         }
     }
+    currTask->tp_Flags &= ~TASKPPCF_CHOWN;                              //R4: on failure too, as WarpOS ".end" (powerpc.p:9387-9393) and 17.13b ".SkipToEnd" (ppcfunctions.p:5409-5414). FIXES.md "CODE REVIEW OF lib/"
     args.db_Arg[0] = NULL;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
     return NULL;

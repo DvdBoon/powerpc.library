@@ -1043,7 +1043,7 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     PowerPCBase->pp_BusyCounter = 24;
     /* powerpc.p:906, "stwi PRI_MAXDIST,PPC_REACTION(r30)" -- THIS is the
      * field that slot holds. The SCHED_REACTION tag overrides it at
-     * functionsppc.c:3495, as the original does at :13215-13231. */
+     * functionsppc.c:3496, as the original does at :13215-13231. */
     PowerPCBase->pp_LowActivityPri = PRI_MAXDIST;
     PowerPCBase->pp_EnAlignExc = initData->id_Environment1 >> 8;
     PowerPCBase->pp_EnDAccessExc = initData->id_Environment2 >> 8;
@@ -1218,9 +1218,9 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
      * writes SPRG0 -- it expects to find it set up.
      *
      * zp_ExcScratch is eight words in page zero serving that purpose. It is
-     * absolutely addressed, so it needs no allocation and no assumption about
-     * the effective-to-physical mapping, and the BAT that covers page zero is
-     * BAT_VALID_SUPERVISOR|BAT_VALID_USER.
+     * absolutely addressed: no allocation, no assumption about the mapping.
+     * BAT0, which covers page zero, is supervisor-only (setupppc.c:316) --
+     * enough, since reading SPRG0, which finds it, is privileged (R6).
      *
      * This is only safe because kernel.s no longer stages SRR0/SRR1 in
      * SPRG0/SPRG1 -- it uses zp_ExcSRR0/zp_ExcSRR1 -- and _SmallExcHandler no

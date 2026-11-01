@@ -241,6 +241,8 @@ What has changed since 17.15:
   a shared request arriving in that moment was granted while an exclusive
   waiter was being given the semaphore. The hand-off now completes under
   the lock. WarpOS and 17.13b have the same window.
+- CreateTaskPPC() left TASKPPCF_CHOWN set on the calling task when it
+  failed. Fixed.
 
 What has changed since 17.14:
 
