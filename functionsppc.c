@@ -2358,7 +2358,7 @@ PPCFUNCTION VOID mySetExcMMU(__reg("r3") struct PrivatePPCBase* PowerPCBase)
      * translation on. Here every handler already runs translated under the
      * library's BATs, segment registers and SDR1, installed by the exception
      * entry (kernel.s:151-267); pp_ExceptionBATs, the set a port would load,
-     * holds the same BATs (setupppc.c:1135-1143). It compiles to a bare blr:
+     * holds the same BATs (setupppc.c:1165-1173). It compiles to a bare blr:
      * every register is kept (WarpOS promises all but r0 and r3). FIXES.md
      * "ITEM 6, SetExcMMU / ClearExcMMU", 31 Oct 2026.
      */
@@ -4503,10 +4503,17 @@ PPCFUNCTION VOID myRemoveAddrSpace(__reg("r3") struct WarpBase* WarpBase, __reg(
 
 /********************************************************************************************/
 
-PPCFUNCTION ULONG myReadRC(__reg("r3") struct WarpBase* WarpBase, __reg("r4") ULONG arg1,
-						   __reg("r5") ULONG arg2, __reg("r6") ULONG arg3)
+PPCFUNCTION ULONG myReadRC(__reg("r3") struct WarpBase* WarpBase, __reg("r4") APTR pageTable,
+						   __reg("r5") ULONG tableSize, __reg("r6") APTR logicalAddr,
+						   __reg("r7") ULONG vSpace)
 {
-	/* NOT IMPLEMENTED YET. The real one is warp.p:2542, calling ReadRCInfo at
+	/* THE FOUR ARGUMENTS OF warp.p's In: block (:2533-2537): the page table,
+	 * its size, the logical address and the virtual space id, -1 for the
+	 * current one. Its signature line (:2529) says base + 3, which this used
+	 * to follow; myRemoveAddrSpace takes its vSpace the same way. FIXES.md
+	 * "#4 (WAS ITEM 12), ReadRC's ARGUMENTS", 1 Nov 2026.
+	 *
+	 * NOT IMPLEMENTED YET. The real one is warp.p:2542, calling ReadRCInfo at
 	 * warp.p:3370. Returns zero for now. */
 
 	WarpBase->wb_CallCount[3] += 1;

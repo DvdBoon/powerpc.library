@@ -324,8 +324,8 @@ VOID  myAddAddrSpace(__r3 struct WarpBase* WarpBase, __r4 APTR pageTable,
 VOID  myRemoveAddrSpace(__r3 struct WarpBase* WarpBase, __r4 APTR pageTable,
                         __r5 ULONG start, __r6 ULONG end, __r7 ULONG tableSize,
                         __r8 ULONG vSpace);
-ULONG myReadRC(__r3 struct WarpBase* WarpBase, __r4 ULONG arg1, __r5 ULONG arg2,
-               __r6 ULONG arg3);
+ULONG myReadRC(__r3 struct WarpBase* WarpBase, __r4 APTR pageTable,
+               __r5 ULONG tableSize, __r6 APTR logicalAddr, __r7 ULONG vSpace);
 ULONG mySetExceptPPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 ULONG signals, __r5 ULONG mask, __r6 ULONG flag);
 VOID myObtainSemaphoreSharedPPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct SignalSemaphorePPC* SemaphorePPC);
 LONG myAttemptSemaphoreSharedPPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct SignalSemaphorePPC* SemaphorePPC);

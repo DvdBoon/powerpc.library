@@ -1790,6 +1790,48 @@ struct InitData* SetupKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
     writememL(configBase, IMMR_POTAR0, (vgamemBase >> 12));
     writememL(configBase, IMMR_POCMR0, POCMR_EN|POCMR_CM_512MB);
 
+    /*
+     * WINDOW 1: THE SECOND CARD'S MEMORY AS EXTRA MEMORY (:496-500), as
+     * 17.13b's DoSecWin (powerpc.s:1352-1374): local ic_startBAT +
+     * OFFSET_PCIMEM -> PCI ic_startBAT, at the size the detection found
+     * (17.13b read its size index as a byte size and always opened 128 MB).
+     * With its own local access window, PCILAWBAR0, the user's choice:
+     * 17.13b's single one spanned the whole Mediator window
+     * (powerpc.s:1302-1310), ours spans 512 MB from the primary card (above),
+     * which need not reach the second card. ic_sizeBAT is only set behind a
+     * Mediator, where the detection runs. FIXES.md "#3: RESTORE 17.13b's
+     * MAPPING", 1 Nov 2026.
+     */
+    if (myConsts->ic_sizeBAT)
+    {
+        ULONG cmSize, lawSize;
+
+        if (myConsts->ic_sizeBAT == 0x4000000)
+        {
+            cmSize  = POCMR_CM_64MB;
+            lawSize = LAWAR_64MB;
+        }
+        else if (myConsts->ic_sizeBAT == 0x8000000)
+        {
+            cmSize  = POCMR_CM_128MB;
+            lawSize = LAWAR_128MB;
+        }
+        else
+        {
+            cmSize  = POCMR_CM_256MB;
+            lawSize = LAWAR_256MB;
+        }
+
+        D(("Setting up the second card's memory: PCI window at %08lx located from %08lx\n",
+           myConsts->ic_startBAT + OFFSET_PCIMEM, myConsts->ic_startBAT));
+
+        writememL(configBase, IMMR_PCILAWBAR0, (myConsts->ic_startBAT + OFFSET_PCIMEM));
+        writememL(configBase, IMMR_PCILAWAR0, (LAWAR_EN|lawSize));
+        writememL(configBase, IMMR_POBAR1, ((myConsts->ic_startBAT + OFFSET_PCIMEM) >> 12));
+        writememL(configBase, IMMR_POTAR1, (myConsts->ic_startBAT >> 12));
+        writememL(configBase, IMMR_POCMR1, POCMR_EN|cmSize);
+    }
+
     writememL(ppcmemBase, VEC_SYSTEMRESET - 4, OPCODE_FBRANCH);
     writememL(ppcmemBase, VEC_SYSTEMRESET, OPCODE_BBRANCH - 4);
 

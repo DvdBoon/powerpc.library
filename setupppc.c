@@ -323,7 +323,37 @@ PPCSETUP void mmuSetup(__reg("r3") struct InitData* initData)
     dbatl = ibatl | BAT_CACHE_INHIBITED;
 
     setBAT2(ibatl, ibatu, dbatl, ibatu);
-                                     //adding using second ATI card as memory
+
+    /*
+     * BAT3: THE SECOND CARD'S MEMORY AS EXTRA MEMORY, where the marker
+     * "adding using second ATI card as memory" stood (libinit.c:496-500: a
+     * Radeon's memory, offered by the Mediator as "pcidma memory", with a
+     * Voodoo as the primary card). As 17.13b's mmuSetup (setupppc.p:1577-1610):
+     * EA id_StartBat, PA id_StartBat + OFFSET_PCIMEM, cache-inhibited, for
+     * user and supervisor; none when the primary card is an ATI. id_SizeBat
+     * is the byte size the detection found (17.13b passed an index).
+     * FIXES.md "#3: RESTORE 17.13b's MAPPING", 1 Nov 2026.
+     */
+    if ((initData->id_SizeBat) && (initData->id_GfxType != VENDOR_ATI))
+    {
+        if (initData->id_SizeBat == 0x4000000)
+        {
+            batSize = BAT_BL_64M;
+        }
+        else if (initData->id_SizeBat == 0x8000000)
+        {
+            batSize = BAT_BL_128M;
+        }
+        else
+        {
+            batSize = BAT_BL_256M;
+        }
+        ibatl = (initData->id_StartBat + OFFSET_PCIMEM) | BAT_CACHE_INHIBITED | BAT_READ_WRITE;
+        ibatu = initData->id_StartBat | batSize | BAT_VALID_SUPERVISOR | BAT_VALID_USER;
+
+        setBAT3(ibatl, ibatu, ibatl, ibatu);
+        mSync();
+    }
 
     physAddr     = OFFSET_SYSMEM;
     startEffAddr = physAddr + (initData->id_MemBase);
