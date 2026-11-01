@@ -223,6 +223,16 @@ What has changed since 17.15:
   mode.
 - K1/M1 (PCI): the memory of a second graphics card (a Radeon, with a Voodoo
   as primary card) is usable by the PPC again, as in 17.13b.
+- ReplyMsgPPC() marks every reply NT_REPLYMSG. Before, only a reply to a
+  68k message was marked.
+- A SignalPPC() that hit a task's exception signals (tc_SigExcept) hung the
+  sending task. Fixed.
+- PutMsgPPC(), ReplyMsgPPC() and SignalPPC() can now be called from
+  exception handlers, as WarpOS documents. Before, they could hang the PPC.
+- ReleaseSemaphorePPC(), handing a semaphore to tasks waiting for shared
+  access, could take the end of the wait queue for a waiter and corrupt the
+  semaphore, and read a waiter's data after waking it. A shared request
+  made with ProcurePPC() kept the shared waiters behind it waiting. Fixed.
 
 What has changed since 17.14:
 
