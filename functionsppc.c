@@ -3762,20 +3762,20 @@ PPCFUNCTION VOID myProcurePPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
     }
 
     while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
-
-    if ((SemaphorePPC->ssppc_SS.ss_QueueCount += 1) && (SemaphorePPC->ssppc_SS.ss_Owner))
+    //R7: ONE increment; granted if it was free or its owner already is ours (the task, or NULL for a shared procure), queued otherwise -- as WarpOS (powerpc.p:13867-13890) and 17.13b (ppcfunctions.p:5655-5686). FIXES.md "CODE REVIEW OF lib/"
+    if ((SemaphorePPC->ssppc_SS.ss_QueueCount += 1) && (SemaphorePPC->ssppc_SS.ss_Owner != (struct Task*)owner))
     {
         myAddTailPPC(PowerPCBase, (struct List*)&SemaphorePPC->ssppc_SS.ss_WaitQueue, (struct Node*)SemaphoreMessage);
         FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
     }
     else
     {
-        if (!(SemaphorePPC->ssppc_SS.ss_QueueCount += 1))
+        if (!(SemaphorePPC->ssppc_SS.ss_QueueCount))                       //it was free: WarpOS "stw r28,SS_OWNER" (:13872)
         {
-            SemaphorePPC->ssppc_SS.ss_Owner = (struct Task*)PowerPCBase->pp_ThisPPCProc;
+            SemaphorePPC->ssppc_SS.ss_Owner = (struct Task*)owner;
         }
         SemaphoreMessage->ssm_Semaphore = (struct SignalSemaphore*)SemaphorePPC;
-        SemaphoreMessage->ssm_Message.mn_Node.ln_Type = 0;
+        *((ULONG*)(myStore)) = 0;                                           //the whole waiter word at +8: WarpOS "stw r0,SSR_WAITER" (:13876), 17.13b "stw r0,LN_TYPE" (:5663)
         SemaphorePPC->ssppc_SS.ss_NestCount += 1;
         FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
         myReplyMsgPPC(PowerPCBase, (struct Message*)SemaphoreMessage);
@@ -3798,7 +3798,7 @@ PPCFUNCTION VOID myVacatePPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
     ULONG myStore = (ULONG)&SemaphoreMessage->ssm_Message.mn_Node.ln_Type;
-    myStore = 0;
+    *((ULONG*)(myStore)) = 0;                                           //R8: the whole waiter word at +8, not the local -- WarpOS "stw r0,SSR_WAITER" (powerpc.p:13918), 17.13b "stw r0,LN_TYPE" (ppcfunctions.p:5722)
     SemaphoreMessage->ssm_Semaphore = 0;
 
     while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
