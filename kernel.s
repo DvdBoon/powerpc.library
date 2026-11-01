@@ -354,7 +354,7 @@ _ExcCommon:
 #       flushes no exit, only where code changes (warp.p:2674-2675,
 #       CreateTaskPPC powerpc.p:9304, SetCache powerpc.p:11144/11147). This
 #       keeps 17.13b's flush wherever a different task (or idle) takes over --
-#       a program's first run (DispatchPPC, kernel.c:1459), a RunPPC waking a
+#       a program's first run (DispatchPPC, kernel.c:1554), a RunPPC waking a
 #       waiting task, a Run68K returning after a wait -- and drops it on traps
 #       that return to the task they interrupted. A nested trap still flushes.
 #       The decision is made here, while r1 is still this trap's frame, and
