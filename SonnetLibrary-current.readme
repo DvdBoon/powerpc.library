@@ -213,6 +213,16 @@ What has changed since 17.15:
   on exit. Fixed.
 - The dummy warp.library (now 5.2) is built in PPC memory, so PPC code can
   call it.
+- Tasks created with TASKATTR_BAT started with all four BATs cleared. They
+  now get the system BATs like any other task.
+- GetInfo() GETINFO_CPU on Harrier and MPC107 boards now answers from the
+  CPU itself for every CPU, as 17.13b did. Before, the Harrier answered only
+  a 750FX or 7410, and the MPC107 called a 745x a G3.
+- Super() is now recognised by its address, as in WarpOS. Before, any
+  program exception with 0xABADBEEF in r4 switched the task to supervisor
+  mode.
+- K1/M1 (PCI): the memory of a second graphics card (a Radeon, with a Voodoo
+  as primary card) is usable by the PPC again, as in 17.13b.
 
 What has changed since 17.14:
 
