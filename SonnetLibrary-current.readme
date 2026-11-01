@@ -243,6 +243,8 @@ What has changed since 17.15:
   the lock. WarpOS and 17.13b have the same window.
 - CreateTaskPPC() left TASKPPCF_CHOWN set on the calling task when it
   failed. Fixed.
+- A task created with TASKATTR_ATOMIC was still switched out like any
+  other task. It now keeps the CPU until it waits or ends, as in WarpOS.
 
 What has changed since 17.14:
 

@@ -317,7 +317,7 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
 
             if (currTask)
             {
-                if (currTask->tp_Task.tc_State == TS_ATOMIC)
+                if (currTask->tp_Task.tc_State == TS_ATOMIC)            //never true: no tc_State write in lib/ stores TS_ATOMIC; a running atomic task is kept in SwitchPPC, as WarpOS (R3)
                 {
                     break;
                 }
@@ -399,7 +399,7 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
 
             if (currTask)
             {
-                if (currTask->tp_Task.tc_State == TS_ATOMIC)
+                if (currTask->tp_Task.tc_State == TS_ATOMIC)            //never true: no tc_State write in lib/ stores TS_ATOMIC; a running atomic task is kept in SwitchPPC, as WarpOS (R3)
                 {
                     break;
                 }
@@ -1326,6 +1326,10 @@ PPCKERNEL void SwitchPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
                 break;
             }
             break;
+        }
+        if ((currTask->tp_Task.tc_State == TS_RUN) && (currTask->tp_Flags & TASKPPCF_ATOMIC))
+        {
+            break;      //R3: a RUNNING atomic task keeps the CPU until it waits or ends -- no switch, not to a new task either -- as WarpOS "bne .done" (powerpc.p:4559-4566), before TS_REMOVED as there (:4569). FIXES.md "CODE REVIEW OF lib/"
         }
         if (currTask->tp_Task.tc_State == TS_REMOVED)
         {
