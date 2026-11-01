@@ -366,8 +366,10 @@ VOID KSendMsgFramePPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFr
 VOID KFreeMsgFramePPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFrame* msgFrame);
 LONG StricmpPPC(__r3 STRPTR string1, __r4 STRPTR string2);
 VOID CauseDECInterrupt(__r3 struct PrivatePPCBase* PowerPCBase);
+VOID MergeIntMsgs(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgPortPPC* port);
 VOID InsertOnPri(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct List* list, __r5 struct TaskPPC* myTask);
 VOID HandleMsgs(__r3 struct PrivatePPCBase* PowerPCBase);
+VOID HandleDeferred(__r3 struct PrivatePPCBase* PowerPCBase);
 VOID SwitchPPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct iframe* iframe);
 void TaskCheck(__r3 struct PrivatePPCBase* PowerPCBase);
 VOID SystemStart(__r3 struct PrivatePPCBase* PowerPCBase);

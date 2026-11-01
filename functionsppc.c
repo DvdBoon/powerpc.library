@@ -1589,6 +1589,45 @@ PPCFUNCTION VOID mySignalPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
         }
         case NT_PPCTASK:
         {
+            if (PowerPCBase->pp_ExceptionMode)
+            {
+                /*
+                 * FROM AN EXCEPTION HANDLER, as WarpOS (powerpc.p:10744-10780):
+                 * the task is not touched -- the pp_Mutex below and
+                 * CheckExcSignal's wait would spin for ever in a handler that
+                 * interrupted their holder. The signals go into the task's own
+                 * tp_Link, queued on pp_TaskLinks for kernel.c's
+                 * HandleDeferred, and a waiting task gets the decrementer soon,
+                 * WarpOS's SetTimer(0). A second signal before the kernel has
+                 * run is ORed in; WarpOS stores only the new one there
+                 * (:10777-10779, "or r0,r0,r5" then "stw r5"), not copied. A
+                 * task already being removed is not queued. FIXES.md "#1 PART B
+                 * DESIGNED", 1 Nov 2026.
+                 */
+                if (task->tp_Task.tc_State != TS_REMOVED)
+                {
+                    struct TaskLink* link = &task->tp_Link;
+
+                    if (!(link->tl_Used))
+                    {
+                        link->tl_Task = (APTR)task;
+                        link->tl_Sig  = signals;
+                        link->tl_Used = -1;
+                        myAddTailPPC(PowerPCBase, (struct List*)&PowerPCBase->pp_TaskLinks, (struct Node*)link);
+                    }
+                    else
+                    {
+                        link->tl_Sig |= signals;
+                    }
+
+                    if (task->tp_Task.tc_State == TS_WAIT)
+                    {
+                        setDEC(30);
+                    }
+                }
+                return;
+            }
+
             signals = CheckExcSignal(PowerPCBase, task, signals);
             while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
 
@@ -2358,7 +2397,7 @@ PPCFUNCTION VOID mySetExcMMU(__reg("r3") struct PrivatePPCBase* PowerPCBase)
      * translation on. Here every handler already runs translated under the
      * library's BATs, segment registers and SDR1, installed by the exception
      * entry (kernel.s:151-267); pp_ExceptionBATs, the set a port would load,
-     * holds the same BATs (setupppc.c:1165-1173). It compiles to a bare blr:
+     * holds the same BATs (setupppc.c:1166-1174). It compiles to a bare blr:
      * every register is kept (WarpOS promises all but r0 and r3). FIXES.md
      * "ITEM 6, SetExcMMU / ClearExcMMU", 31 Oct 2026.
      */
@@ -2842,6 +2881,7 @@ PPCFUNCTION struct Message* myWaitPortPPC(__reg("r3") struct PrivatePPCBase* Pow
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
     myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&port->mp_Semaphore);
+    MergeIntMsgs(PowerPCBase, port);                    //a handler's messages first, as WarpOS (powerpc.p:12375-12399)
 
     volatile struct Message* topMsg = (struct Message*)port->mp_Port.mp_MsgList.lh_Head;
 
@@ -2854,6 +2894,7 @@ PPCFUNCTION struct Message* myWaitPortPPC(__reg("r3") struct PrivatePPCBase* Pow
         myWaitPPC(PowerPCBase, waitSig);
 
         myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&port->mp_Semaphore);
+        MergeIntMsgs(PowerPCBase, port);                //and after the wait (powerpc.p:12418-12444)
 
         topMsg = (struct Message*)port->mp_Port.mp_MsgList.lh_Head;
     }
@@ -2880,7 +2921,27 @@ PPCFUNCTION VOID myPutMsgPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
     args.db_Arg[1] = (ULONG)message;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
+    if (PowerPCBase->pp_ExceptionMode)
+    {
+        /*
+         * FROM AN EXCEPTION HANDLER, as WarpOS's .exc (powerpc.p:12487-12490,
+         * :12523-12540): onto the port's internal list, without the semaphore
+         * a handler cannot wait for. The next task to use the port has the
+         * kernel move it onto mp_MsgList (MergeIntMsgs, HandleDeferred).
+         * FIXES.md "#1 PART B DESIGNED", 1 Nov 2026.
+         */
+        message->mn_Node.ln_Type = NT_MESSAGE;
+        myAddTailPPC(PowerPCBase, &port->mp_IntMsg, (struct Node*)message);
+
+        if ((port->mp_Port.mp_SigTask) && (!(port->mp_Port.mp_Flags & PF_ACTION)))
+        {
+            mySignalPPC(PowerPCBase, port->mp_Port.mp_SigTask, (1 << port->mp_Port.mp_SigBit));
+        }
+        return;
+    }
+
     myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&port->mp_Semaphore);
+    MergeIntMsgs(PowerPCBase, port);                    //a handler's messages first, as WarpOS
 
     message->mn_Node.ln_Type = NT_MESSAGE;
 
@@ -2910,6 +2971,7 @@ PPCFUNCTION struct Message* myGetMsgPPC(__reg("r3") struct PrivatePPCBase* Power
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
     myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&port->mp_Semaphore);
+    MergeIntMsgs(PowerPCBase, port);                    //a handler's messages first, as WarpOS (powerpc.p:12579-12603)
 
     struct Message* myMsg = (struct Message*)myRemHeadPPC(PowerPCBase, (struct List*)&port->mp_Port.mp_MsgList);
 
@@ -2961,7 +3023,28 @@ PPCFUNCTION VOID myReplyMsgPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
     else
     {
         struct MsgPortPPC* myPort = (struct MsgPortPPC*)message->mn_ReplyPort;
+
+        if (PowerPCBase->pp_ExceptionMode)
+        {
+            /*
+             * FROM AN EXCEPTION HANDLER, as WarpOS's .exc (powerpc.p:12647-12650,
+             * :12701-12713): onto the reply port's internal list, without its
+             * semaphore. WarpOS takes this branch before its 68k-message test,
+             * which would put an NT_XMESSAGE reply on a 68k port's list; here
+             * the 68k branch above goes first, its frames taking no lock.
+             * FIXES.md "#1 PART B DESIGNED", 1 Nov 2026.
+             */
+            myAddTailPPC(PowerPCBase, &myPort->mp_IntMsg, (struct Node*)message);
+
+            if ((myPort->mp_Port.mp_SigTask) && (!(myPort->mp_Port.mp_Flags & PF_ACTION)))
+            {
+                mySignalPPC(PowerPCBase, myPort->mp_Port.mp_SigTask, (1 << myPort->mp_Port.mp_SigBit));
+            }
+            return;
+        }
+
         myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&myPort->mp_Semaphore);
+        MergeIntMsgs(PowerPCBase, myPort);              //a handler's messages first, as WarpOS (powerpc.p:12672-12697)
         myAddTailPPC(PowerPCBase, (struct List*)&myPort->mp_Port.mp_MsgList, (struct Node*)message);
 
         if ((myPort->mp_Port.mp_SigTask) && (!(myPort->mp_Port.mp_Flags & PF_ACTION)))

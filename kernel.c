@@ -323,6 +323,7 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                 }
             }
 
+            HandleDeferred(PowerPCBase);    //what a handler left: FIXES.md "#1 PART B DESIGNED"
             HandleMsgs(PowerPCBase);
             TaskCheck(PowerPCBase);
             SwitchPPC(PowerPCBase, iframe);
@@ -404,6 +405,7 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                 }
             }
 
+            HandleDeferred(PowerPCBase);    //what a handler left: FIXES.md "#1 PART B DESIGNED"
             HandleMsgs(PowerPCBase);
             TaskCheck(PowerPCBase);
             SwitchPPC(PowerPCBase, iframe);
@@ -732,7 +734,7 @@ PPCFUNCTION void TaskCheck(__reg("r3") struct PrivatePPCBase* PowerPCBase)
     /*
      * pp_TaskExcept IS CLEARED ON EVERY PASS, as 17.13b's kernel does
      * (setupppc.p:3631-3634), whether or not it named the current task.
-     * CheckExcSignal waits for it to clear (supportppc.c:336), and nothing
+     * CheckExcSignal waits for it to clear (supportppc.c:379), and nothing
      * cleared it, so a SignalPPC that hit a task's exception signals hung its
      * sender. FIXES.md "#1 PART B DESIGNED, AND A THIRD DEFECT (C)", 1 Nov 2026.
      */
@@ -860,6 +862,70 @@ PPCFUNCTION void TaskCheck(__reg("r3") struct PrivatePPCBase* PowerPCBase)
             EnqueuePPC((struct List*)&PowerPCBase->pp_ReadyTasks, (struct Node*)currWTask);
         }
         currWTask = nxtWTask;
+    }
+    return;
+}
+
+/********************************************************************************************
+*
+*	WHAT AN EXCEPTION HANDLER LEFT FOR THE KERNEL (WarpOS: powerpc.p:4050-4068 and
+*	:4467-4514). Called from the external and decrementer arms after their pp_Mutex /
+*	pp_FlagForbid guard, so no task is inside the lists it touches.
+*	1. The port a task handed over (supportppc.c's MergeIntMsgs): its internal list
+*	   onto mp_MsgList, then the flag cleared, which releases the task.
+*	2. The signals a handler's SignalPPC queued: each task's tp_Link off
+*	   pp_TaskLinks, tl_Used cleared; exception signals marked for TaskCheck as
+*	   CheckExcSignal marks them (pp_TaskExcept); the rest ORed into tc_SigRecvd,
+*	   where TaskCheck wakes a waiting task whose tc_SigWait they hit, and a task
+*	   between its Wait and the switch (TS_CHANGING) kept running, as mySignalPPC
+*	   does. A task already TS_REMOVED is only taken off.
+*	FIXES.md "#1 PART B DESIGNED", 1 Nov 2026.
+*
+*********************************************************************************************/
+
+PPCKERNEL void HandleDeferred(__reg("r3") struct PrivatePPCBase* PowerPCBase)
+{
+    if (PowerPCBase->pp_FlagPortInUse)
+    {
+        struct MsgPortPPC* port = PowerPCBase->pp_CurrentPort;
+        struct Node* msg;
+
+        while (msg = RemHeadPPC(&port->mp_IntMsg))
+        {
+            AddTailPPC((struct List*)&port->mp_Port.mp_MsgList, msg);
+        }
+        PowerPCBase->pp_FlagPortInUse = 0;
+    }
+
+    struct TaskLink* link;
+
+    while (link = (struct TaskLink*)RemHeadPPC((struct List*)&PowerPCBase->pp_TaskLinks))
+    {
+        struct TaskPPC* task = (struct TaskPPC*)link->tl_Task;
+        ULONG signals = link->tl_Sig;
+
+        link->tl_Used = 0;
+
+        if (task->tp_Task.tc_State == TS_REMOVED)
+        {
+            continue;
+        }
+
+        ULONG sigmask = (task->tp_Task.tc_SigRecvd | signals) & task->tp_Task.tc_SigExcept;
+
+        if (sigmask)
+        {
+            task->tp_Task.tc_SigRecvd |= sigmask;
+            signals &= ~sigmask;
+            PowerPCBase->pp_TaskExcept = task;
+        }
+
+        task->tp_Task.tc_SigRecvd |= signals;
+
+        if (task->tp_Task.tc_State == TS_CHANGING)
+        {
+            task->tp_Task.tc_State = TS_RUN;
+        }
     }
     return;
 }
@@ -1264,6 +1330,11 @@ PPCKERNEL void SwitchPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
         if (currTask->tp_Task.tc_State == TS_REMOVED)
         {
             AddTailPPC((struct List*)&PowerPCBase->pp_RemovedTasks, (struct Node*)currTask);
+            if (currTask->tp_Link.tl_Used)  //a handler's queued signal, off before its memory goes
+            {
+                RemovePPC((struct Node*)&currTask->tp_Link);
+                currTask->tp_Link.tl_Used = 0;
+            }
             currTask = NULL;
             PowerPCBase->pp_ThisPPCProc = currTask;
             iframe->if_Context.ec_SRR1 = MACHINESTATE_DEFAULT;

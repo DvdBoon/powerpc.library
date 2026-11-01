@@ -1028,6 +1028,7 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     NewListPPC((struct List*)&PowerPCBase->pp_NewTasks);
     NewListPPC((struct List*)&PowerPCBase->pp_ReadyTasks);
     NewListPPC((struct List*)&PowerPCBase->pp_RemovedTasks);
+    NewListPPC((struct List*)&PowerPCBase->pp_TaskLinks);           //a handler's SignalPPC, for HandleDeferred
     NewListPPC((struct List*)&PowerPCBase->pp_MsgQueue);
 
     initSema(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemWaitList);
@@ -1042,7 +1043,7 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     PowerPCBase->pp_BusyCounter = 24;
     /* powerpc.p:906, "stwi PRI_MAXDIST,PPC_REACTION(r30)" -- THIS is the
      * field that slot holds. The SCHED_REACTION tag overrides it at
-     * functionsppc.c:3364, as the original does at :13215-13231. */
+     * functionsppc.c:3447, as the original does at :13215-13231. */
     PowerPCBase->pp_LowActivityPri = PRI_MAXDIST;
     PowerPCBase->pp_EnAlignExc = initData->id_Environment1 >> 8;
     PowerPCBase->pp_EnDAccessExc = initData->id_Environment2 >> 8;

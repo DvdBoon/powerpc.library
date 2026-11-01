@@ -324,6 +324,14 @@ APTR                        pp_ExcStackMem;
  * earlier offset moves. FIXES.md "ITEM 3, Super()".
  */
 ULONG                       pp_SuperLocation;
+/*
+ * SIGNALS SENT FROM AN EXCEPTION HANDLER, waiting for the kernel: WarpOS's
+ * PPC_TASKLINK (powerpc_local.i:105). A handler's SignalPPC queues the task's
+ * own tp_Link (powerpc/tasksPPC.h) here instead of touching the task
+ * (powerpc.p:10744-10780), and kernel.c's HandleDeferred applies them.
+ * Appended, so no earlier offset moves. FIXES.md "#1 PART B DESIGNED".
+ */
+struct MinList              pp_TaskLinks;
 };
 
 struct killFIFO {

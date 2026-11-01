@@ -309,6 +309,49 @@ PPCFUNCTION VOID CauseDECInterrupt(__reg("r3") struct PrivatePPCBase* PowerPCBas
 
 /********************************************************************************************
 *
+*	THE PORT'S INTERNAL LIST, HANDED TO THE KERNEL. A handler's PutMsgPPC or ReplyMsgPPC
+*	appends to mp_IntMsg without the port's semaphore. A task holding that semaphore asks
+*	the kernel to move those messages onto mp_MsgList before it uses the port, and waits
+*	until it has: WarpOS's PutMsgPPC, GetMsgPPC, ReplyMsgPPC and WaitPortPPC
+*	(powerpc.p:12493-12519, :12579-12603, :12672-12697, :12375-12399, :12418-12444), with
+*	pp_CurrentPort / pp_FlagPortInUse for PPC_INTPORT / PPC_FORCEMESSAGE and
+*	CauseDECInterrupt for SetTimer(0), as 17.13b. The kernel's half is HandleDeferred
+*	(kernel.c). FIXES.md "#1 PART B DESIGNED", 1 Nov 2026.
+*
+*********************************************************************************************/
+
+PPCFUNCTION VOID MergeIntMsgs(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct MsgPortPPC* port)
+{
+    struct List* intList = &port->mp_IntMsg;
+
+    if (intList->lh_TailPred == (struct Node*)intList)
+    {
+        return;
+    }
+
+    while (1)
+    {
+        ForbidPPC(PowerPCBase);
+        if (!(*((volatile UBYTE*)&PowerPCBase->pp_FlagPortInUse)))
+        {
+            PowerPCBase->pp_CurrentPort   = port;
+            PowerPCBase->pp_FlagPortInUse = -1;
+            PermitPPC(PowerPCBase);
+            break;
+        }
+        PermitPPC(PowerPCBase);
+        while (*((volatile UBYTE*)&PowerPCBase->pp_FlagPortInUse));
+    }
+
+    CauseDECInterrupt(PowerPCBase);
+
+    while (*((volatile UBYTE*)&PowerPCBase->pp_FlagPortInUse));
+
+    return;
+}
+
+/********************************************************************************************
+*
 *
 *
 *********************************************************************************************/
@@ -685,6 +728,17 @@ PPCFUNCTION VOID SystemStart(__reg("r3") struct PrivatePPCBase* PowerPCBase)
         myWaitTime(PowerPCBase, 0, 0x4c0000); // Around 5 seconds.
         while (myTask = (struct TaskPPC*)myRemHeadPPC(PowerPCBase, (struct List*)&PowerPCBase->pp_RemovedTasks))
         {
+            /*
+             * NOT WHILE A HANDLER'S SIGNAL FOR IT STILL WAITS on pp_TaskLinks:
+             * its tp_Link is in the task's memory. The kernel's next pass
+             * takes it off (HandleDeferred), and a handler queues no task that
+             * is already TS_REMOVED. FIXES.md "#1 PART B DESIGNED".
+             */
+            while (*((volatile UWORD*)&myTask->tp_Link.tl_Used))
+            {
+                CauseDECInterrupt(PowerPCBase);
+            }
+
             if ((myTask->tp_Flags & TASKPPCF_CRASHED) && (myTask->tp_Flags & TASKPPCF_CREATORPPC))
             {
                 myDeleteTaskPPC(PowerPCBase, myTask);
