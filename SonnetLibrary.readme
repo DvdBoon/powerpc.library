@@ -240,6 +240,10 @@ What has changed since 17.15:
   access, could take the end of the wait queue for a waiter and corrupt the
   semaphore, and read a waiter's data after waking it. A shared request
   made with ProcurePPC() kept the shared waiters behind it waiting. Fixed.
+- ProcurePPC() could leave a semaphore's owner unset and its queue count
+  wrong, granted an exclusive request to a semaphore held shared, and
+  queued the owner's own nested request behind itself. VacatePPC() left a
+  shared request's message changed, so using it again could crash. Fixed.
 
 What has changed since 17.14:
 
