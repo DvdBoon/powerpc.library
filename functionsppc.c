@@ -2940,9 +2940,18 @@ PPCFUNCTION VOID myReplyMsgPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
         return;
     }
 
-    if (message->mn_Node.ln_Type == NT_XMSG68K)
+    /*
+     * EVERY REPLY IS NT_REPLYMSG, as WarpOS (powerpc.p:12645-12646) and
+     * 17.13b (ppcfunctions.p:7808-7810) set it before branching. This set it
+     * only for an NT_XMSG68K message, so an ordinary reply kept its type.
+     * FIXES.md "#1 (THE 11:03 TABLE), MESSAGE PORTS FROM EXCEPTION
+     * HANDLERS", part A, 1 Nov 2026.
+     */
+    UBYTE oldType = message->mn_Node.ln_Type;
+    message->mn_Node.ln_Type = NT_REPLYMSG;
+
+    if (oldType == NT_XMSG68K)
     {
-        message->mn_Node.ln_Type = NT_REPLYMSG;
         struct MsgFrame* myFrame = CreateMsgFramePPC(PowerPCBase);
         myFrame->mf_Arg[0] = (ULONG)message;
         myFrame->mf_Identifier = ID_RX68;
