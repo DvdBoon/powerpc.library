@@ -729,6 +729,15 @@ PPCFUNCTION void TaskCheck(__reg("r3") struct PrivatePPCBase* PowerPCBase)
         }
     }
 
+    /*
+     * pp_TaskExcept IS CLEARED ON EVERY PASS, as 17.13b's kernel does
+     * (setupppc.p:3631-3634), whether or not it named the current task.
+     * CheckExcSignal waits for it to clear (supportppc.c:336), and nothing
+     * cleared it, so a SignalPPC that hit a task's exception signals hung its
+     * sender. FIXES.md "#1 PART B DESIGNED, AND A THIRD DEFECT (C)", 1 Nov 2026.
+     */
+    PowerPCBase->pp_TaskExcept = 0;
+
     if (!(PowerPCBase->pp_FlagWait))
     {
         struct WaitTime* currWait = (struct WaitTime*)PowerPCBase->pp_WaitTime.mlh_Head;
