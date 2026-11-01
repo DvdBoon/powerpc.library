@@ -1004,50 +1004,81 @@ PPCFUNCTION VOID myReleaseSemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerP
     args.db_Arg[0] = (ULONG)SemaphorePPC;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
-	while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
+    while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
 
-	SemaphorePPC->ssppc_SS.ss_NestCount -= 1;
+    SemaphorePPC->ssppc_SS.ss_NestCount -= 1;
 
-	if (SemaphorePPC->ssppc_SS.ss_NestCount < 0)
-	{
+    if (SemaphorePPC->ssppc_SS.ss_NestCount < 0)
+    {
         FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
         HaltError(ERR_ESEM);
-	}
+    }
 
-	if (SemaphorePPC->ssppc_SS.ss_NestCount > 0)
-	{
-		SemaphorePPC->ssppc_SS.ss_QueueCount -= 1;
-		FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
-	}
-	else
-	{
-		SemaphorePPC->ssppc_SS.ss_Owner = 0;
-		SemaphorePPC->ssppc_SS.ss_QueueCount -= 1;
+    if (SemaphorePPC->ssppc_SS.ss_NestCount > 0)
+    {
+        SemaphorePPC->ssppc_SS.ss_QueueCount -= 1;
         FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
-		
+    }
+    else
+    {
+        /*
+         * THE HAND-OFF IS DECIDED WHILE pp_Mutex IS HELD -- R1, a deliberate
+         * divergence from WarpOS and 17.13b (FIXES.md "CODE REVIEW OF lib/").
+         * Both free their lock before the hand-off writes the new owner --
+         * PERMIT at powerpc.p:10079, the owner at :10097; AtomicDone in
+         * 17.13b's .NotLast -- and both ObtainSemaphoreSharedPPCs grant at
+         * once when the owner is 0 (powerpc.p:13756-13760). A task switch in
+         * that window gave a shared caller the semaphore while an exclusive
+         * waiter was being made its owner: two holders. Here every grant --
+         * the waiters taken off the queue, the owner, the nest count -- is
+         * made before pp_Mutex is freed, and only the wake-ups come after,
+         * because SignalPPC and ReplyMsgPPC take pp_Mutex themselves.
+         *
+         * Who is woken: an exclusive task by its pointer, wakeTask -- its
+         * wait node is not written, because a TrySemaphorePPC waiter whose
+         * time ran out still takes that node off the queue itself -- and
+         * everything else, shared waiters and messages, chained through
+         * their own nodes, which nobody reads after the wake-up. Each link
+         * is read before its node is woken (R5). The grants, the order of
+         * the wake-ups and the walks are the ones the code made before.
+         */
+        struct TaskPPC* wakeTask = NULL;
+        struct SemWait* wakeHead = NULL;
+        struct SemWait* wakeTail = NULL;
+        ULONG           handOff  = 0;
+
+#define SEMWAKE(w)  { (w)->sw_Node.mln_Succ = NULL;                                  \
+                      if (wakeTail) wakeTail->sw_Node.mln_Succ = (struct MinNode*)(w); \
+                      else wakeHead = (w);                                           \
+                      wakeTail = (w); }
+
+        SemaphorePPC->ssppc_SS.ss_Owner = 0;
+        SemaphorePPC->ssppc_SS.ss_QueueCount -= 1;
+
         if (SemaphorePPC->ssppc_SS.ss_QueueCount != -1)
-		{
-			SemaphorePPC->ssppc_lock = 1;
-			struct SemWait* myWait = (struct SemWait*)myRemHeadPPC(PowerPCBase, (struct List*)&SemaphorePPC->ssppc_SS.ss_WaitQueue);
+        {
+            handOff = 1;
+            SemaphorePPC->ssppc_lock = 1;
+            struct SemWait* myWait = (struct SemWait*)myRemHeadPPC(PowerPCBase, (struct List*)&SemaphorePPC->ssppc_SS.ss_WaitQueue);
 
             if (myWait)
-			{
-				struct TaskPPC* currTask = myWait->sw_Task;
+            {
+                struct TaskPPC* currTask = myWait->sw_Task;
                 struct TaskPPC* sigTask = (struct TaskPPC*)((ULONG)currTask & ~SM_SHARED);
-				if (!(SM_SHARED & (ULONG)currTask)) //not shared
-				{
-					if (sigTask)
-					{
+                if (!(SM_SHARED & (ULONG)currTask)) //not shared
+                {
+                    if (sigTask)
+                    {
                         SemaphorePPC->ssppc_SS.ss_Owner = (struct Task*)sigTask;
-						SemaphorePPC->ssppc_SS.ss_NestCount += 1;
-						mySignalPPC(PowerPCBase, sigTask, SIGF_SINGLE);
-					}
-					else
-					{
+                        SemaphorePPC->ssppc_SS.ss_NestCount += 1;
+                        wakeTask = sigTask;
+                    }
+                    else
+                    {
                         SemaphorePPC->ssppc_SS.ss_Owner = (struct Task*)myWait->sw_Semaphore;
-						myWait->sw_Semaphore = SemaphorePPC;
-						SemaphorePPC->ssppc_SS.ss_NestCount += 1;
-						myReplyMsgPPC(PowerPCBase, (struct Message*)myWait);
+                        myWait->sw_Semaphore = SemaphorePPC;
+                        SemaphorePPC->ssppc_SS.ss_NestCount += 1;
+                        SEMWAKE(myWait);
 
                         myWait = (struct SemWait*)SemaphorePPC->ssppc_SS.ss_WaitQueue.mlh_Head;
                         struct SemWait* nxtWait;
@@ -1064,8 +1095,7 @@ PPCFUNCTION VOID myReleaseSemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerP
 
                                     SemaphorePPC->ssppc_SS.ss_NestCount += 2;
                                     myWait->sw_Semaphore = SemaphorePPC;
-
-                                    myReplyMsgPPC(PowerPCBase, (struct Message*)myWait);
+                                    SEMWAKE(myWait);
                                 }
                             }
                             else if (myWait->sw_Task == (struct TaskPPC*)SemaphorePPC->ssppc_SS.ss_Owner)
@@ -1075,61 +1105,79 @@ PPCFUNCTION VOID myReleaseSemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerP
                                 nxtWait->sw_Node.mln_Pred = predWait;
 
                                 SemaphorePPC->ssppc_SS.ss_NestCount += 1;
-						        mySignalPPC(PowerPCBase, myWait->sw_Task, SIGF_SINGLE);
-
+                                wakeTask = myWait->sw_Task;
                                 break;
                             }
                             myWait = nxtWait;
                         }
-					}
-				}
-				else //shared
-				{
-                    struct SemWait* nxtWait = NULL;
-                    struct SemWait* rest    = (struct SemWait*)SemaphorePPC->ssppc_SS.ss_WaitQueue.mlh_Head;     //read before the first wake-up, as WarpOS .wakeshared (powerpc.p:10152): R5
-                    while (1)
+                    }
+                }
+                else //shared
+                {
+                    //the walk starts at the queue's head, read now, as WarpOS .wakeshared (powerpc.p:10152): R5
+                    struct SemWait* nxtWait = (struct SemWait*)SemaphorePPC->ssppc_SS.ss_WaitQueue.mlh_Head;
+
+                    while (myWait)
                     {
-                        while (nxtWait)
-                        {
-                            myWait = nxtWait;
-                            nxtWait = (struct SemWait*)myWait->sw_Node.mln_Succ;
-                            //no successor: the list's tail marker, whose "sw_Task" is ss_MultipleLink -- stop, as 17.13b's .link31 (FIXES.md "CODE REVIEW OF lib/", #2)
-                            if ((nxtWait) && ((ULONG)myWait->sw_Task & SM_SHARED))
-                            {
-                                sigTask = (struct TaskPPC*)((ULONG)myWait->sw_Task & ~SM_SHARED);
-                                myRemovePPC(PowerPCBase, (struct Node*)myWait);
-                                break;
-                            }
-                            myWait = 0;
-                        }
-                        if (!(myWait))
-                        {
-                            break;
-                        }
-
                         SemaphorePPC->ssppc_SS.ss_NestCount += 1;
-                        if (sigTask)
-                        {
-                            mySignalPPC(PowerPCBase, sigTask, SIGF_SINGLE);
-                        }
-                        else
+                        if (!((ULONG)myWait->sw_Task & ~SM_SHARED))     //a message: granted and its waiter word cleared
                         {
                             myWait->sw_Semaphore = SemaphorePPC;
                             myWait->sw_Task = 0;
-                            myReplyMsgPPC(PowerPCBase, (struct Message*)myWait);
                         }
-                        //the next node was read BEFORE the wake-up (the queue's head on the first pass, the walk's nxtWait after it), never from the node just woken: its SemWait is on the waiter's stack, a message is relinked by the reply. As WarpOS .checkmore (powerpc.p:10167-10170) and 17.13b .link31: FIXES.md "CODE REVIEW OF lib/", R5
-                        if (!(nxtWait))
+                        SEMWAKE(myWait);
+
+                        myWait = NULL;
+                        while (nxtWait)
                         {
-                            nxtWait = rest;
+                            struct SemWait* candWait = nxtWait;
+                            nxtWait = (struct SemWait*)candWait->sw_Node.mln_Succ;
+                            //no successor: the list's tail marker, whose "sw_Task" is ss_MultipleLink -- stop, as 17.13b's .link31 (FIXES.md "CODE REVIEW OF lib/", #2)
+                            if (!(nxtWait))
+                            {
+                                break;
+                            }
+                            if ((ULONG)candWait->sw_Task & SM_SHARED)
+                            {
+                                myRemovePPC(PowerPCBase, (struct Node*)candWait);
+                                myWait = candWait;
+                                break;
+                            }
                         }
                     }
-				}
-			}
-			SemaphorePPC->ssppc_lock = 0;
+                }
+            }
         }
-	}
-	return;
+#undef SEMWAKE
+
+        FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
+
+        //the wake-ups, after the lock; each link read before its node is woken (R5)
+        while (wakeHead)
+        {
+            struct SemWait* doneWait = wakeHead;
+            struct TaskPPC* doneTask = (struct TaskPPC*)((ULONG)doneWait->sw_Task & ~SM_SHARED);
+            wakeHead = (struct SemWait*)doneWait->sw_Node.mln_Succ;
+
+            if (doneTask)
+            {
+                mySignalPPC(PowerPCBase, doneTask, SIGF_SINGLE);
+            }
+            else
+            {
+                myReplyMsgPPC(PowerPCBase, (struct Message*)doneWait);
+            }
+        }
+        if (wakeTask)
+        {
+            mySignalPPC(PowerPCBase, wakeTask, SIGF_SINGLE);
+        }
+        if (handOff)
+        {
+            SemaphorePPC->ssppc_lock = 0;
+        }
+    }
+    return;
 }
 
 /********************************************************************************************

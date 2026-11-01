@@ -237,6 +237,10 @@ What has changed since 17.15:
   wrong, granted an exclusive request to a semaphore held shared, and
   queued the owner's own nested request behind itself. VacatePPC() left a
   shared request's message changed, so using it again could crash. Fixed.
+- ReleaseSemaphorePPC() freed its lock before it named the next owner, so
+  a shared request arriving in that moment was granted while an exclusive
+  waiter was being given the semaphore. The hand-off now completes under
+  the lock. WarpOS and 17.13b have the same window.
 
 What has changed since 17.14:
 
