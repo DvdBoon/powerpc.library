@@ -1086,7 +1086,7 @@ PPCFUNCTION VOID myReleaseSemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerP
 				else //shared
 				{
                     struct SemWait* nxtWait = NULL;
-
+                    struct SemWait* rest    = (struct SemWait*)SemaphorePPC->ssppc_SS.ss_WaitQueue.mlh_Head;     //read before the first wake-up, as WarpOS .wakeshared (powerpc.p:10152): R5
                     while (1)
                     {
                         while (nxtWait)
@@ -1118,10 +1118,10 @@ PPCFUNCTION VOID myReleaseSemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerP
                             myWait->sw_Task = 0;
                             myReplyMsgPPC(PowerPCBase, (struct Message*)myWait);
                         }
-
-                        if (!(nxtWait = (struct SemWait*)myWait->sw_Node.mln_Succ))
+                        //the next node was read BEFORE the wake-up (the queue's head on the first pass, the walk's nxtWait after it), never from the node just woken: its SemWait is on the waiter's stack, a message is relinked by the reply. As WarpOS .checkmore (powerpc.p:10167-10170) and 17.13b .link31: FIXES.md "CODE REVIEW OF lib/", R5
+                        if (!(nxtWait))
                         {
-                            break;
+                            nxtWait = rest;
                         }
                     }
 				}
