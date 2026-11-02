@@ -364,6 +364,8 @@ struct MsgFrame* KCreateMsgFramePPC(__r3 struct PrivatePPCBase* PowerPCBase);
 struct MsgFrame* KGetMsgFramePPC(__r3 struct PrivatePPCBase* PowerPCBase);
 VOID KSendMsgFramePPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFrame* msgFrame);
 VOID KFreeMsgFramePPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFrame* msgFrame);
+ULONG KSystemCall(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct SysCall* sc);   /* kernel.c; libinit.c stores its address */
+ULONG CallKernel(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct SysCall* sc);    /* supportppc.c: "sc", or KSystemCall in a handler */
 LONG StricmpPPC(__r3 STRPTR string1, __r4 STRPTR string2);
 VOID CauseDECInterrupt(__r3 struct PrivatePPCBase* PowerPCBase);
 VOID MergeIntMsgs(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgPortPPC* port);

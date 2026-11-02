@@ -332,6 +332,17 @@ ULONG                       pp_SuperLocation;
  * Appended, so no earlier offset moves. FIXES.md "#1 PART B DESIGNED".
  */
 struct MinList              pp_TaskLinks;
+/*
+ * WHERE THE KERNEL'S KSystemCall RUNS, for an exception handler's SetCache and
+ * message frames (supportppc.c's CallKernel). A handler is already in
+ * supervisor mode inside the kernel, so it calls the kernel instead of
+ * trapping into it again with "sc" -- REVIEW-LIB.md K1 -- as WarpOS's SetCache
+ * does the work itself in exception mode (powerpc.p:11092-11103). Stored by
+ * libinit.c: the kernel is another hunk, copied to OFFSET_KERNEL, and PPC C
+ * cannot take a symbol's address. 0 until then. Appended, so no earlier
+ * offset moves.
+ */
+ULONG                       pp_KSystemCall;
 };
 
 struct killFIFO {

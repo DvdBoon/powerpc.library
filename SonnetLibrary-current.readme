@@ -260,6 +260,11 @@ What has changed since 17.15:
   68k side, Ctrl-C included, were lost from then on. Fixed.
 - A signal relayed to a task's 68k mirror read the mirror's address from
   Amiga memory every time. It is now read on the PPC side, as in WarpOS.
+- SetCache(), Signal68K() and a reply to a 68k message hung or crashed the
+  PPC when called from an exception handler: they trapped into the kernel a
+  second time. From a handler they now call the kernel directly, as
+  WarpOS's SetCache does. An exception handler must not read or write
+  Amiga memory.
 
 What has changed since 17.14:
 

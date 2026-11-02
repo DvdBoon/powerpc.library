@@ -625,31 +625,22 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
 
             struct SysCall* sc = (struct SysCall*)scReg;
 
+            /* the five calls are KSystemCall's, which a handler calls
+             * directly (REVIEW-LIB.md K1); r3 comes back as it did: the frame
+             * for CREATEMSG and GETMSG, untouched for the other three */
             switch (sc->sc_Function)
             {
                 case SC_CREATEMSG:
-                {
-                    iframe->if_Context.ec_GPR[3] = (ULONG)KCreateMsgFramePPC(PowerPCBase);
-                    break;
-                }
                 case SC_GETMSG:
                 {
-                    iframe->if_Context.ec_GPR[3] = (ULONG)KGetMsgFramePPC(PowerPCBase);
+                    iframe->if_Context.ec_GPR[3] = KSystemCall(PowerPCBase, sc);
                     break;
                 }
                 case SC_SENDMSG:
-                {
-                    KSendMsgFramePPC(PowerPCBase, (struct MsgFrame*)sc->sc_Arg[0]);
-                    break;
-                }
                 case SC_FREEMSG:
-                {
-                    KFreeMsgFramePPC(PowerPCBase, (struct MsgFrame*)sc->sc_Arg[0]);
-                    break;
-                }
                 case SC_SETCACHE:
                 {
-                    KSetCache(PowerPCBase, sc->sc_Arg[0], (APTR)sc->sc_Arg[1], sc->sc_Arg[2]);
+                    KSystemCall(PowerPCBase, sc);
                     break;
                 }
                 default:
@@ -2421,6 +2412,52 @@ PPCKERNEL VOID KFreeMsgFramePPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, 
 	}
 
 	return;
+}
+
+/********************************************************************************************
+*
+*
+*
+*********************************************************************************************/
+
+PPCKERNEL ULONG KSystemCall(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct SysCall* sc)
+{
+    /*
+     * THE FIVE SYSTEM CALLS, in one place. A task reaches them by "sc", through
+     * the VEC_SYSTEMCALL arm of Exception_Entry. An exception handler calls
+     * this directly, by the address libinit.c stores in pp_KSystemCall
+     * (supportppc.c's CallKernel): it is already in supervisor mode inside the
+     * kernel, and an "sc" from there re-entered the kernel and clobbered the
+     * interrupted task's saved state -- REVIEW-LIB.md K1. Returns the frame for
+     * SC_CREATEMSG and SC_GETMSG, 0 for the other three.
+     */
+    switch (sc->sc_Function)
+    {
+        case SC_CREATEMSG:
+        {
+            return (ULONG)KCreateMsgFramePPC(PowerPCBase);
+        }
+        case SC_GETMSG:
+        {
+            return (ULONG)KGetMsgFramePPC(PowerPCBase);
+        }
+        case SC_SENDMSG:
+        {
+            KSendMsgFramePPC(PowerPCBase, (struct MsgFrame*)sc->sc_Arg[0]);
+            break;
+        }
+        case SC_FREEMSG:
+        {
+            KFreeMsgFramePPC(PowerPCBase, (struct MsgFrame*)sc->sc_Arg[0]);
+            break;
+        }
+        case SC_SETCACHE:
+        {
+            KSetCache(PowerPCBase, sc->sc_Arg[0], (APTR)sc->sc_Arg[1], sc->sc_Arg[2]);
+            break;
+        }
+    }
+    return 0;
 }
 
 /********************************************************************************************

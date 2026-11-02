@@ -1874,7 +1874,7 @@ PPCFUNCTION VOID mySetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __re
     sc.sc_Arg[1] = (ULONG)start;
     sc.sc_Arg[2] = length;
 
-    SystemCall(&sc);
+    CallKernel(PowerPCBase, &sc);   //in a handler, the kernel directly, as WarpOS (powerpc.p:11092-11103); REVIEW-LIB.md K1
 
     return;
 }

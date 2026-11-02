@@ -896,6 +896,15 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
      * FIXES.md "THE PHASE SPLIT", 24 Oct 2026.
      */
     myBase->pp_ExcStackMem = AllocVec(EXCSTACK_SIZE, MEMF_PUBLIC|MEMF_PPC|MEMF_REVERSE|MEMF_CLEAR);
+    /*
+     * WHERE KSystemCall RUNS ON THE PPC, for an exception handler's SetCache and
+     * message frames (REVIEW-LIB.md K1). The kernel hunk is copied from
+     * kernelPointer + 4 to OFFSET_KERNEL (the CopyMem below) and runs there, so
+     * a kernel symbol's PPC address is its offset in the hunk plus
+     * OFFSET_KERNEL -- the vectors branch to OFFSET_KERNEL the same way
+     * (setupppc.c:415).
+     */
+    myBase->pp_KSystemCall = OFFSET_KERNEL + ((ULONG)KSystemCall - (kernelPointer + 4));
 
     myZeroPage->zp_SysBase      = SysBase;
     myZeroPage->zp_PPCMemHeader = myPPCMemHeader;

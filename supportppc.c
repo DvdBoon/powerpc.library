@@ -118,12 +118,38 @@ PPCFUNCTION VOID PermitPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 *
 *********************************************************************************************/
 
+PPCFUNCTION ULONG CallKernel(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct SysCall* sc)
+{
+    /*
+     * IN AN EXCEPTION HANDLER, CALL THE KERNEL; DO NOT TRAP INTO IT AGAIN. The
+     * five system calls -- SetCache and the message frames -- are an "sc" from
+     * a task, which runs in user mode. A handler runs in supervisor mode inside
+     * the kernel already, and its "sc" re-entered it: the nested entry saved
+     * the handler's registers over the interrupted task's, and the outer exit
+     * resumed the handler instead of the task (REVIEW-LIB.md K1). WarpOS's
+     * SetCache does the work itself in exception mode (powerpc.p:11092-11103),
+     * and its ReplyMsgPPC never calls the 68k from a handler (:12648-12650):
+     * THIS MATCHES. pp_KSystemCall is 0 only until libinit.c stores it.
+     */
+    if ((PowerPCBase->pp_ExceptionMode) && (PowerPCBase->pp_KSystemCall))
+    {
+        return ((ULONG (*)(__reg("r3") struct PrivatePPCBase*, __reg("r4") struct SysCall*))PowerPCBase->pp_KSystemCall)(PowerPCBase, sc);
+    }
+    return SystemCall(sc);
+}
+
+/********************************************************************************************
+*
+*
+*
+*********************************************************************************************/
+
 PPCFUNCTION struct MsgFrame* CreateMsgFramePPC(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 {
 	struct SysCall sc;
     sc.sc_Function = SC_CREATEMSG;
 
-    ULONG msgFrame = SystemCall(&sc);
+    ULONG msgFrame = CallKernel(PowerPCBase, &sc);
 
 //#if 0
     if (msgFrame)
@@ -150,7 +176,7 @@ PPCFUNCTION struct MsgFrame* GetMsgFramePPC(__reg("r3") struct PrivatePPCBase* P
     struct SysCall sc;
     sc.sc_Function = SC_GETMSG;
 
-    ULONG msgFrame = SystemCall(&sc);
+    ULONG msgFrame = CallKernel(PowerPCBase, &sc);
 
 	return (struct MsgFrame*)msgFrame;
 }
@@ -167,7 +193,7 @@ PPCFUNCTION VOID SendMsgFramePPC(__reg("r3") struct PrivatePPCBase* PowerPCBase,
     sc.sc_Function = SC_SENDMSG;
     sc.sc_Arg[0] = (ULONG)msgFrame;
 
-    SystemCall(&sc);
+    CallKernel(PowerPCBase, &sc);
 
 	return;
 }
@@ -184,7 +210,7 @@ PPCFUNCTION VOID FreeMsgFramePPC(__reg("r3") struct PrivatePPCBase* PowerPCBase,
     sc.sc_Function = SC_FREEMSG;
     sc.sc_Arg[0] = (ULONG)msgFrame;
 
-    SystemCall(&sc);
+    CallKernel(PowerPCBase, &sc);
 
 	return;
 }
