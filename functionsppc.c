@@ -139,12 +139,13 @@ PPCFUNCTION LONG myWaitFor68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
 
     ULONG recvdSigs, signals;
     ULONG sigMask = SIGF_DOS;
+    ULONG heldSigs = 0;     //Q2: signals no 68k mirror could take, given back when the call returns
 
     struct TaskPPC* myTask = PowerPCBase->pp_ThisPPCProc;
 
     while (1)
     {
-        recvdSigs = myWaitPPC(PowerPCBase, myTask->tp_Task.tc_SigAlloc & 0xfffff100);
+        recvdSigs = myWaitPPC(PowerPCBase, myTask->tp_Task.tc_SigAlloc & 0xfffff100 & ~heldSigs);
         if (recvdSigs & sigMask)
         {
             if (signals = recvdSigs & ~sigMask)
@@ -168,7 +169,7 @@ PPCFUNCTION LONG myWaitFor68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
                         }
 
                         while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
-                        myTask->tp_Task.tc_SigRecvd |= myFrame->mf_Signals;
+                        myTask->tp_Task.tc_SigRecvd |= myFrame->mf_Signals | heldSigs;
                         FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
 
                         myCopyMemPPC(PowerPCBase, (APTR)&myFrame->mf_PPCArgs, (APTR)PPStruct, sizeof(struct PPCArgs));
@@ -185,6 +186,12 @@ PPCFUNCTION LONG myWaitFor68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
                     {
                         ULONG value = myFrame->mf_PPCArgs.PP_Regs[0];
                         FreeMsgFramePPC(PowerPCBase, myFrame);
+                        if (heldSigs)       //Q2: as ID_DONE
+                        {
+                            while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
+                            myTask->tp_Task.tc_SigRecvd |= heldSigs;
+                            FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
+                        }
                         return (LONG)value;
                     }
                     case ID_END:
@@ -204,10 +211,19 @@ PPCFUNCTION LONG myWaitFor68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
         else
         {
             struct NewTask* myNewTask = (struct NewTask*)myTask;
-            struct MsgPort* mirrorPort;
-            if ((signals = recvdSigs & ~sigMask) && (mirrorPort = myNewTask->nt_Task.pt_MirrorPort) && (!(PowerPCBase->pp_PowerPCBase.PPC_Flags & LIB_FLAGPPC_SCC)))
+            struct Task* mirror68K;
+            if (signals = recvdSigs & ~sigMask)
             {
-                mySignal68K(PowerPCBase, mirrorPort->mp_SigTask, signals);
+                //X2: TO THE MIRROR THE TASK HOLDS, pt_Mirror68K. This read "pt_MirrorPort->mp_SigTask": that port is in Amiga memory (MirrorTask creates it with TF_PPC off), so every relay was a DSI proxied through the 68k, the PPC spinning with interrupts off until the answer -- subdemo 3, the first step that relays, froze the machine. pt_Mirror68K is set with pt_MirrorPort (:168, kernel.c:1569). WarpOS relays to CORE_PROC68K, held on the PPC side (powerpc.p:15697-15698). K2 had been overwriting pt_Mirror68K below the iframe. REVIEW-LIB.md X2
+                if ((mirror68K = myNewTask->nt_Task.pt_Mirror68K) && (!(PowerPCBase->pp_PowerPCBase.PPC_Flags & LIB_FLAGPPC_SCC)))
+                {
+                    mySignal68K(PowerPCBase, mirror68K, signals);
+                }
+                else
+                {
+                    //Q2: NO MIRROR TO RELAY THEM TO -- a CreateTaskPPC task before its first Run68K returns (pt_MirrorPort is set from its ID_DONE), or SetCPUComm. WaitPPC has already cleared them, so dropping them lost them for good (17.13b too, ".WasNoMsg -- No 68k mirror exists (yet)"). Keep them, out of the wait, for this task. WarpOS always has CORE_PROC68K to relay to (powerpc.p:15694-15700). REVIEW-LIB.md Q2
+                    heldSigs |= signals;
+                }
             }
         }
     }
@@ -1577,7 +1593,7 @@ PPCFUNCTION ULONG mySetSignalPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase,
 	while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
 
 	ULONG oldSig = myTask->tp_Task.tc_SigRecvd;
-	myTask->tp_Task.tc_SigRecvd = (signals &= mask) | (oldSig &= ~mask);
+	myTask->tp_Task.tc_SigRecvd = (signals & mask) | (oldSig & ~mask);  //X1: oldSig is RETURNED, so it must not change. "oldSig &= ~mask" returned the old signals with the changed bits cleared, and "SetSignalPPC(0, mask) & mask" -- the usual Ctrl-C poll -- was always 0. WarpOS returns the untouched old value ("andc r7,r31,r5" on a copy, then r31, powerpc.p:10673-10700). REVIEW-LIB.md X1
 
 	FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
 

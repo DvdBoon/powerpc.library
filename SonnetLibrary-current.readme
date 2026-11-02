@@ -249,6 +249,17 @@ What has changed since 17.15:
   already held by the caller), so the matching ReleaseSemaphorePPC()
   stopped the task with "PPC Semaphore in illegal state". Fixed, as in
   WarpOS.
+- A signal sent to a CreateTaskPPC() task during its first Run68K() was
+  lost, so a later WaitPPC() on it could hang. It is now kept and handed
+  back when the call returns.
+- SetSignalPPC() returned the old signals with the changed bits cleared,
+  so SetSignalPPC(0, mask) & mask -- the usual test for Ctrl-C -- was
+  always 0. Fixed, as in WarpOS.
+- A SMALLCONTEXT exception handler wrote below the task's exception frame.
+  The task lost its link to its 68k mirror, so signals forwarded from the
+  68k side, Ctrl-C included, were lost from then on. Fixed.
+- A signal relayed to a task's 68k mirror read the mirror's address from
+  Amiga memory every time. It is now read on the PPC side, as in WarpOS.
 
 What has changed since 17.14:
 

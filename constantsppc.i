@@ -153,6 +153,12 @@
 # the XCONTEXT -- it used to be written over XCO_R3.
 .set SEH_XCONTEXT,              300
 .set SEH_STATUS,                336
+# K2: the function's own lr and its caller's r2 (TOC), kept across
+# _LoadFrame and the handler. They were stored at iframe-12 and iframe-16, below
+# the frame, where a 68k-started task keeps pt_StartMsg and tp_MessageRIP. 412 is
+# the first word after the r14-r31 save at 340-411 (REVIEW-LIB.md K2).
+.set SEH_LR,                    412
+.set SEH_R2,                    416
 
 .set PPCTASK_FLAGS,             0x0E
 .set PPCTASK_SWITCH,            0x42

@@ -936,7 +936,7 @@ PPCFUNCTION VOID StartTask(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
     struct TaskPPC* myTask = PowerPCBase->pp_ThisPPCProc;
     struct PrivateTask* myPTask = (struct PrivateTask*)myTask;
     struct MsgFrame* newFrame;
-    struct MsgPort* myPort;
+    struct Task* mirror68K;
     ULONG signals;
     ULONG mask;
 
@@ -978,9 +978,10 @@ PPCFUNCTION VOID StartTask(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
         }
         else if (mask = signals & ~SIGF_DOS)
         {
-            if (myPort = myPTask->pt_MirrorPort)
+            //X2: to pt_Mirror68K, as myWaitFor68K -- "pt_MirrorPort->mp_SigTask" read the 68k caller's port, a DSI through the 68k on every relay. DispatchPPC sets both (kernel.c:1569-1570). REVIEW-LIB.md X2
+            if (mirror68K = myPTask->pt_Mirror68K)
             {
-                mySignal68K(PowerPCBase, myPort->mp_SigTask, mask);
+                mySignal68K(PowerPCBase, mirror68K, mask);
             }
         }
     }

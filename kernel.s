@@ -1094,7 +1094,14 @@ _SmallExcHandler:  #debugdebug to be redone
         stw     r4,316(r1)                   #iframe. WAS mtsprg0, which _LoadFrame
         stw     r3,320(r1)                   #ExcData. WAS mtsprg3, which it also takes
         mflr    r3
-        stw     r3,-12(r4)                   #Store this function's lr
+        stw     r3,SEH_LR(r1)                #this function's lr, in its own frame. K2: it
+                                             #was stored at -12(r4), BELOW the iframe, and
+                                             #the TOC at -16(r4) and EXC_LR at -8(r4) too.
+                                             #A 68k-started task's iframe is nt_Context at
+                                             #task+0x100, so -8 was pt_Mirror68K (0xF8):
+                                             #every SMALLCONTEXT exception replaced the
+                                             #task's mirror pointer with a code address.
+                                             #17.15's; kept through 03647d9. REVIEW-LIB.md K2
 
         bl      _LoadFrame                   #LR, r0, r1 and r3 are skipped in this routine and are loaded below
 
@@ -1108,12 +1115,11 @@ _SmallExcHandler:  #debugdebug to be redone
                                              #so iFUSION's exc_sc read nothing
                                              #useful at 4(r3). FIXES.md item 11
         lwz     r3,320(r1)                   #ExcData
-        lwz     r0,IF_CONTEXT_LR(r4)         #EXC_LR
+        lwz     r0,IF_CONTEXT_LR(r4)         #EXC_LR, kept at 324 and restored from there
         stw     r0,324(r1)
-        stw     r0,-8(r4)                    #Will be used later in StoreFrame
         lwz     r0,IF_CONTEXT_GPR+GPR1(r4)   #GPR[1]
         stw     r0,328(r1)
-        stw     r2,-16(r4)
+        stw     r2,SEH_R2(r1)                #the caller's TOC, in this frame (K2)
         lwz     r0,IF_CONTEXT_GPR+GPR2(r4)   #GPR[2]
         lwz     r2,18(r3)                    #DATA   (ed_Data; Node is 14 under pack(2))
         stw     r0,332(r1)
@@ -1166,8 +1172,8 @@ _SmallExcHandler:  #debugdebug to be redone
         lwz     r5,316(r1)                   #iframe
         stw     r4,IF_CONTEXT_GPR+GPR4(r5)   #GPR[4]
         lwz     r6,324(r1)                   #EXC_LR
-        lwz     r4,-12(r5)                   #Retrieve this function's lr
-        lwz     r2,-16(r5)
+        lwz     r4,SEH_LR(r1)                #this function's lr (K2)
+        lwz     r2,SEH_R2(r1)                #the caller's TOC (K2)
         stw     r6,IF_CONTEXT_LR(r5)         #EXC_LR
         lwz     r7,328(r1)                   #GPR[1]
         mtlr    r4
