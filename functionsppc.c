@@ -3610,6 +3610,7 @@ PPCFUNCTION LONG myTrySemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerPCBas
     if (!(SemaphorePPC->ssppc_SS.ss_QueueCount += 1))
     {
         SemaphorePPC->ssppc_SS.ss_Owner = (struct Task*)myTask;
+        SemaphorePPC->ssppc_SS.ss_NestCount += 1;   //W2: a grant counts a nest, as WarpOS's .success -> .end (powerpc.p:13534-13537) and AttemptSemaphorePPC here; without it the release halted the task. REVIEW-LIB.md W2
         FreeMutexPPC((ULONG)SemaphorePPC->ssppc_reserved);
         FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
         status = ATTEMPT_SUCCESS;
@@ -3618,6 +3619,7 @@ PPCFUNCTION LONG myTrySemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerPCBas
     {
         if (SemaphorePPC->ssppc_SS.ss_Owner == (struct Task*)myTask)
         {
+            SemaphorePPC->ssppc_SS.ss_NestCount += 1;   //W2: the owner's nested grant too
             FreeMutexPPC((ULONG)SemaphorePPC->ssppc_reserved);
             FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
             status = ATTEMPT_SUCCESS;
