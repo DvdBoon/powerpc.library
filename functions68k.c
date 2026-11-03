@@ -281,6 +281,20 @@ LIBFUNC68K LONG myCRunPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __reg(
     myFrame->mf_Arg[1]                  = thisTask->tc_SigAlloc;
     myFrame->mf_Arg[2]                  = (ULONG)thisTask;
 
+    /*
+     * THE CALLER'S PPCArgs IS NOT WRITTEN, apart from the registers coming
+     * back (myWaitForPPC) -- REVIEW-LIB.md M2. The copy of the stack
+     * arguments, in PPC memory, goes in the FRAME, and this function frees
+     * it once the call is over. It used to replace the caller's PP_Stack
+     * with the copy, or with NULL, and the reply freed it there, so PP_Stack
+     * came back pointing at freed memory; 17.13b does the same
+     * (powerpc.s:3756-3757, :3774, :3897-3903). WarpOS hands the caller's
+     * struct back as it went in (powerpc.s:3952-3955, :4148-4151): THIS
+     * MATCHES. A local, not a field of the mirror, so that a nested RunPPC
+     * from a Run68K callback keeps its own.
+     */
+    stackPP = NULL;
+
     if ((PPStruct->PP_Stack) && (PPStruct->PP_StackSize))
     {
         if (PPStruct->PP_Flags == PPF_ASYNC)
@@ -292,16 +306,12 @@ LIBFUNC68K LONG myCRunPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __reg(
             return (PPERR_MISCERR);
         }
         CopyMem((const APTR)PPStruct->PP_Stack, stackPP, PPStruct->PP_StackSize);
-        PPStruct->PP_Stack = stackPP;
-    }
-    else
-    {
-        PPStruct->PP_Stack = NULL;
     }
 
 //    MyCopy((APTR)PPStruct, &myFrame->mf_PPCArgs, (sizeof(struct PPCArgs)/4)-1);
 
     CopyMemQuick((APTR)PPStruct, (APTR)(&myFrame->mf_PPCArgs), sizeof(struct PPCArgs));
+    myFrame->mf_PPCArgs.PP_Stack = stackPP;     //the copy, or NULL: the PPC side reads its stack arguments here
 
     SendMsgFrame(PowerPCBase, myFrame);
 
@@ -312,7 +322,13 @@ LIBFUNC68K LONG myCRunPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __reg(
     }
     myMirror->mt_Flags = ((PPStruct->PP_Flags) | PPF_ASYNC);
 
-    return myWaitForPPC(PowerPCBase, PPStruct);
+    LONG status = myWaitForPPC(PowerPCBase, PPStruct);
+
+    if (stackPP)
+    {
+        FreeVec32(stackPP);
+    }
+    return status;
 }
 
 /********************************************************************************************
@@ -541,14 +557,22 @@ LIBFUNC68K LONG myWaitForPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __r
                         thisTask->tc_SigRecvd |= myFrame->mf_Signals;
                         myMirror->mt_PPCTask = myFrame->mf_PPCTask;
 
-                        if (PPStruct->PP_Stack)
-                        {
-                            FreeVec32(PPStruct->PP_Stack);
-                        }
-
                         //MyCopy(&myFrame->mf_PPCArgs, (APTR)PPStruct, (sizeof(struct PPCArgs)/4)-1);
 
-                        CopyMemQuick((APTR)(&myFrame->mf_PPCArgs), (APTR)PPStruct, sizeof(struct PPCArgs));
+                        /*
+                         * THE REGISTERS ONLY, PP_Regs and PP_FRegs. The reply
+                         * frame was zeroed and only they were filled in
+                         * (supportppc.c, StartTask's ID_FPPC), so the whole
+                         * struct handed back PP_Code, PP_Offset, PP_Flags,
+                         * PP_Stack and PP_StackSize as 0, and a caller that
+                         * reused it jumped the PPC to 0 (REVIEW-LIB.md M2).
+                         * 17.13b copies from PP_REGS on (powerpc.s:3906-3911):
+                         * THIS MATCHES. The stack copy is freed by myCRunPPC,
+                         * which made it; this is also the async callers' path,
+                         * which have none.
+                         */
+                        CopyMemQuick((APTR)(&myFrame->mf_PPCArgs.PP_Regs), (APTR)(&PPStruct->PP_Regs),
+                                     sizeof(PPStruct->PP_Regs) + sizeof(PPStruct->PP_FRegs));
                         FreeMsgFrame(PowerPCBase, myFrame);
                         return (PPERR_SUCCESS);
                     }

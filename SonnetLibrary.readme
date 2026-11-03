@@ -272,6 +272,11 @@ What has changed since 17.15:
   second time. From a handler they now call the kernel directly, as
   WarpOS's SetCache does. An exception handler must not read or write
   Amiga memory.
+- RunPPC() and WaitForPPC() handed the PPCArgs structure back with
+  PP_Code, PP_Offset, PP_Flags, PP_Stack and PP_StackSize cleared, so a
+  structure used for a second call crashed the PPC. Only the registers
+  come back now, and the structure is otherwise left as it was, as in
+  WarpOS.
 
 What has changed since 17.14:
 
