@@ -1312,6 +1312,17 @@ _DoDataStore:
         loadreg r8,0x7c00002e                #check for stbx/sthx/stwx/lbzx/lhzx/lwzx
         cmpw    r6,r8
         bne     .NotSupported
+        rlwinm. r0,r12,0,21,21               #K4: the extended opcode's top bit. The test
+        bne     .NotSupported                #above sees only its low six, which lfsx 535,
+                                             #lfdx 599, stfsx 663, stfdx 727 and stfiwx 983
+                                             #share with lwzx..sthx, and the switch below ran
+                                             #them as integer forms, the FPR number taken for
+                                             #a GPR ("lfsx f1" wrote r1). Refused, as lfs, lfd,
+                                             #stfs and stfd already are: the task's DACCESS
+                                             #handlers, then the crash report -- as WarpOS
+                                             #treats a DSI nothing serves (powerpc.p:5955,
+                                             #:5993-5994). 17.13b has the same test
+                                             #(setupppc.p:5509-5512). REVIEW-LIB.md K4
 
         li      r10,1
         rlwinm  r6,r12,13,25,29              #Source reg
@@ -1324,6 +1335,10 @@ _DoDataStore:
         b       .GoStore
 
 .LoadStore:	
+        rlwinm  r0,r12,6,26,31               #K4: the primary opcode. Opcodes 32-47 pass the
+        cmplwi  r0,46                        #test above, but lmw (46) and stmw (47) are no
+        bge     .NotSupported                #single load or store: they ran as sth and sthu.
+                                             #Refused, as the FP forms are. REVIEW-LIB.md K4
         rlwinm  r6,r12,13,25,29              #Get Destination Reg (l) or Source (s)
         rlwinm  r8,r12,18,25,29              #Get Source Reg (l) or Destination (s)
         rlwinm  r9,r12,4,31,31               #Check load or store

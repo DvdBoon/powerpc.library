@@ -270,6 +270,11 @@ What has changed since 17.15:
   structure used for a second call crashed the PPC. Only the registers
   come back now, and the structure is otherwise left as it was, as in
   WarpOS.
+- Floating-point loads and stores with an index register (lfsx, lfdx,
+  stfsx, stfdx), and lmw/stmw, on Amiga memory were emulated as integer
+  accesses: they changed the wrong register or wrote the wrong data. They
+  are now refused like the other floating-point accesses there: the
+  task's exception handlers, then a crash report.
 
 What has changed since 17.14:
 
