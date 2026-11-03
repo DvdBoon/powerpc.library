@@ -275,6 +275,12 @@ What has changed since 17.15:
   accesses: they changed the wrong register or wrote the wrong data. They
   are now refused like the other floating-point accesses there: the
   task's exception handlers, then a crash report.
+- When it refused to start (a 68030, another PPC library already
+  running, no supported PCI bridge, a missing pci.library or
+  prometheus.library), the library could crash the machine after its
+  error requester: it closed libraries it had never opened. It now closes
+  only those it opened, and a prometheus.library too old to use is no
+  longer left open.
 
 What has changed since 17.14:
 

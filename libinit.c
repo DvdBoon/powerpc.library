@@ -296,7 +296,15 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
     struct InitData *cardData;
     APTR nameSpace = NULL;
 
-    struct InternalConsts consts;
+    /*
+     * ZEROED, so that an early exit's CleanUp closes only the bases already
+     * opened. Only ic_SysBase and ic_SegList are set before the first exit,
+     * and PrintCrtErr's CleanUp closes every base slot that is not 0: it
+     * called CloseLibrary on stack garbage after the requester, a guru on any
+     * refused start (REVIEW-LIB.md L1). 17.13b's slots are zeroed storage,
+     * closed only when set (powerpc.s:4513-4520, :268-283): THIS MATCHES.
+     */
+    struct InternalConsts consts = { 0 };
     struct InternalConsts *myConsts = &consts;
 
     SysBase = __sys;
@@ -394,13 +402,14 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
             return NULL;
         }
 
+        myConsts->ic_PciBase = (struct PciBase*)PrometheusBase;    //before the revision test, so its exit closes it (L1)
+
         if (PrometheusBase->lib_Revision < REVPCIP)
         {
             PrintCrtErr(myConsts, "Could not open prometheus.library V4.5+");
             return NULL;
         }
 
-        myConsts->ic_PciBase = (struct PciBase*)PrometheusBase;
         offset = (ULONG)cd->cd_BoardAddr;
     }
 
