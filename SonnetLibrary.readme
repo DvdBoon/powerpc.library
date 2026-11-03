@@ -291,6 +291,10 @@ What has changed since 17.15:
 - CreateMsgPortPPC() returned a freed or half-made port when it failed
   (no free signal, or no memory). It now returns NULL and gives back what
   it took, as in WarpOS.
+- A long run of PPC writes to Amiga memory, or debug output, could reuse a
+  message frame that was still in use, losing a write or corrupting
+  memory. The PPC now waits for a free frame, and the 68k side never takes
+  an empty queue for a frame.
 
 What has changed since 17.14:
 

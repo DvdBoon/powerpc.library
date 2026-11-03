@@ -1468,6 +1468,18 @@ struct MsgFrame* CreateMsgFrame(struct PrivatePPCBase* PowerPCBase)
     struct killFIFO* myFIFO = (struct killFIFO*)((ULONG)(PowerPCBase->pp_PPCMemBase + FIFO_END));
     ULONG msgFrame = NULL;
 
+    /*
+     * NEVER AN EMPTY READ (Q4, REVIEW-LIB.md). An empty inbound free list
+     * reads 0xFFFF_FFFF from the Harrier's MIIQ (its manual, 3-105) and, by
+     * the I2O convention, from the MPC107's IFQPR; Killer's software ring is
+     * empty when kf_MIIFH == kf_MIIFT. That read was returned as a frame, and
+     * the clear below wrote zeros from 0xFFFFFFFF through 0xBB -- AbsExecBase
+     * and the vectors; a second one spun here for ever, as it equalled
+     * kf_CreatePrevious. Now an empty read is retried, with interrupts let in
+     * between, and never becomes kf_CreatePrevious. Every caller is a task.
+     * 17.13b has no empty test either (powerpc.s:2780-2818): THIS DIVERGES,
+     * rightly. WarpOS has no fixed ring (AllocJob, powerpc.s:4395).
+     */
     Disable();
 
     while (1)
@@ -1482,8 +1494,15 @@ struct MsgFrame* CreateMsgFrame(struct PrivatePPCBase* PowerPCBase)
             case DEVICE_MPC8343E:
             case DEVICE_MPC8314E:
             {
-                msgFrame = *((ULONG*)(myFIFO->kf_MIIFT));
-                myFIFO->kf_MIIFT = (myFIFO->kf_MIIFT + 4) & 0xffff3fff;
+                if (*((volatile ULONG*)&myFIFO->kf_MIIFH) == myFIFO->kf_MIIFT)
+                {
+                    msgFrame = 0xFFFFFFFF;              //Q4: empty; the PPC writes kf_MIIFH
+                }
+                else
+                {
+                    msgFrame = *((ULONG*)(myFIFO->kf_MIIFT));
+                    myFIFO->kf_MIIFT = (myFIFO->kf_MIIFT + 4) & 0xffff3fff;
+                }
                 break;
             }
             case DEVICE_MPC107:
@@ -1491,6 +1510,12 @@ struct MsgFrame* CreateMsgFrame(struct PrivatePPCBase* PowerPCBase)
                 msgFrame = readmemL(PowerPCBase->pp_BridgeMsgs, MPC107_IFQPR);
                 break;
             }
+        }
+        if (msgFrame == 0xFFFFFFFF)
+        {
+            Enable();               //Q4: empty; interrupts in while the PPC frees one
+            Disable();
+            continue;
         }
         if (msgFrame != myFIFO->kf_CreatePrevious)
         {
@@ -1589,8 +1614,13 @@ void FreeMsgFrame(struct PrivatePPCBase* PowerPCBase, struct MsgFrame* msgFrame)
         case DEVICE_HARRIER:
         {
             ULONG msgOffset = readmemL(PowerPCBase->pp_BridgeConfig, XCSR_MIOFH);
-            writememL(PowerPCBase->pp_BridgeConfig, XCSR_MIOFH, (msgOffset + 4) & 0xffff3fff);
+            /*
+             * THE SLOT BEFORE THE HEAD (Q8, REVIEW-LIB.md): a PPC waiting for
+             * MIOFH to move (Q4) pops the slot at once. 17.13b writes the slot
+             * (powerpc.s:2891), then MIOFH (:2892); this had them reversed.
+             */
             writememL(PowerPCBase->pp_PPCMemBase, msgOffset, (ULONG)msgFrame);
+            writememL(PowerPCBase->pp_BridgeConfig, XCSR_MIOFH, (msgOffset + 4) & 0xffff3fff);
             break;
         }
         case DEVICE_MPC8343E:

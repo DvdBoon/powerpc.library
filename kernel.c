@@ -2224,6 +2224,20 @@ PPCKERNEL ULONG readmemLongPPC(__reg("r3") ULONG Base, __reg("r4") ULONG offset)
 
 PPCKERNEL struct MsgFrame* KCreateMsgFramePPC(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 {
+    /*
+     * A FRAME ONLY WHEN THE OUTBOUND FREE LIST HAS ONE (Q4, REVIEW-LIB.md).
+     * This popped the tail with no head test, on every bridge. The DSI
+     * proxy's stores post a frame each and do not wait, and debug output's
+     * frames stay on MasterControl's port until printed, so the list could
+     * run empty; the next pop then returned a frame from 4096 pops earlier,
+     * perhaps still queued for the 68k, and it was overwritten and posted
+     * twice. Now it waits while head == tail -- the 68k frees frames on its
+     * own, so the wait ends -- then syncs before reading the slot, as
+     * 17.13b's .ContCreateH (ppcfunctions.p:3109-3110). 17.13b has no empty
+     * test (:3074-3110): THIS DIVERGES, rightly. WarpOS has no fixed ring:
+     * its jobs are allocated per call (AllocJob, powerpc.s:4395; PPCAllocJob,
+     * powerpc.p:15289), NO COUNTERPART. Test: tests/storeflood.
+     */
 	ULONG msgFrame = 0;
 
     switch (PowerPCBase->pp_DeviceID)
@@ -2231,6 +2245,11 @@ PPCKERNEL struct MsgFrame* KCreateMsgFramePPC(__reg("r3") struct PrivatePPCBase*
 		case DEVICE_HARRIER:
 		{
 			ULONG msgOffset = readmemLongPPC(PPC_XCSR_BASE, XCSR_MIOFT);
+            while (readmemLongPPC(PPC_XCSR_BASE, XCSR_MIOFH) == msgOffset)
+            {
+                //Q4: the list is empty until the 68k frees a frame
+            }
+            sync();
             msgFrame = readmemLongPPC(msgOffset, 0);
             writememLongPPC(PPC_XCSR_BASE, XCSR_MIOFT, (msgOffset + 4) & 0xffff3fff);
             break;
@@ -2240,7 +2259,13 @@ PPCKERNEL struct MsgFrame* KCreateMsgFramePPC(__reg("r3") struct PrivatePPCBase*
         case DEVICE_MPC8314E:
 		{
 			struct killFIFO* myFIFO = (struct killFIFO*)((ULONG)(PowerPCBase->pp_PPCMemBase + FIFO_END));
-			msgFrame = *((ULONG*)(myFIFO->kf_MIOFT));
+			ULONG msgOffset = myFIFO->kf_MIOFT;
+			while (*((volatile ULONG*)&myFIFO->kf_MIOFH) == msgOffset)
+			{
+				//Q4: as above; the 68k writes kf_MIOFH, so it is read anew each pass
+			}
+			sync();
+			msgFrame = *((ULONG*)msgOffset);
 			myFIFO->kf_MIOFT = (myFIFO->kf_MIOFT + 4) & 0xffff3fff;
 			break;
 		}
@@ -2248,6 +2273,11 @@ PPCKERNEL struct MsgFrame* KCreateMsgFramePPC(__reg("r3") struct PrivatePPCBase*
 		case DEVICE_MPC107:
 		{
 			ULONG msgOffset = loadPCI(PPC_EUMB_BASE, MPC107_OFTPR);
+            while (loadPCI(PPC_EUMB_BASE, MPC107_OFHPR) == msgOffset)
+            {
+                //Q4: as above
+            }
+            sync();
             msgFrame = readmemLongPPC(msgOffset, 0);
             storePCI(PPC_EUMB_BASE, MPC107_OFTPR, (((msgOffset + 4) | 0xc000) & 0xffff));
             break;
