@@ -281,6 +281,9 @@ What has changed since 17.15:
   error requester: it closed libraries it had never opened. It now closes
   only those it opened, and a prometheus.library too old to use is no
   longer left open.
+- CreateMsgPortPPC() returned a freed or half-made port when it failed
+  (no free signal, or no memory). It now returns NULL and gives back what
+  it took, as in WarpOS.
 
 What has changed since 17.14:
 

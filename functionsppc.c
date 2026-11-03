@@ -2825,14 +2825,26 @@ PPCFUNCTION struct MsgPortPPC* myCreateMsgPortPPC(__reg("r3") struct PrivatePPCB
 			else
 			{
 				myFreeSignalPPC(PowerPCBase, signal);
+				FreeVec68K(PowerPCBase, myPort);
+				myPort = NULL;
 			}
 		}
 		else
 		{
 			FreeVec68K(PowerPCBase, myPort);
+			myPort = NULL;
 		}
 	}
 
+    /*
+     * A FAILED CREATE GIVES BACK ALL IT TOOK AND RETURNS NULL. Until W1
+     * (REVIEW-LIB.md) a failed AllocSignalPPC freed the port and still
+     * returned it, and a failed InitSemaphorePPC returned the unfinished
+     * port, leaked. WarpOS frees the signal, then the port, then returns 0
+     * (.freesig, .free, .err: powerpc.p:12205-12212), and so does 17.13b
+     * (.NoSemMem, .NoSigFree, .NoMsgMem: ppcfunctions.p:1772-1782): THIS
+     * MATCHES. Test: tests/msgport.
+     */
     args.db_Arg[0] = (ULONG)myPort;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
