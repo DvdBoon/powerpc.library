@@ -787,11 +787,47 @@ PPCFUNCTION VOID myDeleteTaskPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase,
     }
     else if (!(PPCtask->tp_Flags & (TASKPPCF_CRASHED)))
     {
+        /*
+         * ITS TIMER NODE COMES OFF pp_WaitTime FIRST (T2, REVIEW-LIB.md). A
+         * task deleted inside WaitTime left its node -- a local on its own
+         * stack (myWaitTime) -- on pp_WaitTime. At the deadline the kernel's
+         * sweep (kernel.c TaskCheck) marked the deleted task TS_READY and
+         * unlinked the node; once Kryten had freed the stack, it walked and
+         * wrote freed memory instead.
+         * The node is found by wt_Task and taken off as WaitTime handles
+         * the list: pp_SemWaitList against another WaitTime's AddHead,
+         * pp_Mutex against its removal after WaitPPC, and pp_FlagWait raised
+         * so the sweep skips the list (it runs only with pp_Mutex free,
+         * kernel.c:310 and :392, but WaitTime raises it there too).
+         * DIVERGES from WarpOS, which has the same gap: the node is on the
+         * stack (powerpc.p:11740-11741) and this path only moves the task
+         * (:9523-9531). 17.13b the same (ppcfunctions.p:9267-9270, :6463-6484).
+         * NOT DONE: the SemWait node of a task deleted while it waits for a
+         * semaphore (myObtainSemaphorePPC, a stack local) stays on that
+         * semaphore's queue -- the same class, REVIEW-LIB.md T2.
+         */
+        myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemWaitList);
         while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
+        PowerPCBase->pp_FlagWait++;
+
+        struct WaitTime* currWait = (struct WaitTime*)PowerPCBase->pp_WaitTime.mlh_Head;
+        struct WaitTime* nxtWait;
+
+        while (nxtWait = (struct WaitTime*)currWait->wt_Node.ln_Succ)
+        {
+            if (currWait->wt_Task == PPCtask)
+            {
+                myRemovePPC(PowerPCBase, (struct Node*)currWait);
+            }
+            currWait = nxtWait;
+        }
+
+        PowerPCBase->pp_FlagWait--;
         myRemovePPC(PowerPCBase, (struct Node*)PPCtask);
         myAddTailPPC(PowerPCBase, (struct List*)&PowerPCBase->pp_RemovedTasks, (struct Node*)PPCtask);
         PPCtask->tp_Task.tc_State = TS_REMOVED;
         FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
+        myReleaseSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemWaitList);
     }
     return;
 }

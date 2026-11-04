@@ -313,6 +313,10 @@ What has changed since 17.15:
   cut another task out of it, and its port was freed twice if its parent
   had already deleted it, often halting the machine. A crashed task is now
   torn down once.
+- A PPC task deleted by another task while it waited in WaitTime() left
+  its timer behind. When the time ran out, the kernel wrote to the
+  deleted task, and into freed memory once the task had been cleaned up.
+  The timer is now removed with the task.
 
 What has changed since 17.14:
 
