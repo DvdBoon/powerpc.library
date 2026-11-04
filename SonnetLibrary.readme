@@ -324,6 +324,10 @@ What has changed since 17.15:
 - The program loader no longer makes an exception for one build of the
   Radeon driver; that build is now loaded like any program the loader has
   no exception for.
+- An atomic PPC task waiting in TrySemaphorePPC() froze the PPC when the
+  semaphore was handed to it. And a TrySemaphorePPC() whose time ran out
+  left the semaphore held after its owner let go, so the next task to ask
+  for it waited for ever. Both are fixed.
 
 What has changed since 17.14:
 

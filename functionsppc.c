@@ -1108,8 +1108,9 @@ PPCFUNCTION VOID myReleaseSemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerP
          * because SignalPPC and ReplyMsgPPC take pp_Mutex themselves.
          *
          * Who is woken: an exclusive task by its pointer, wakeTask -- its
-         * wait node is not written, because a TrySemaphorePPC waiter whose
-         * time ran out still takes that node off the queue itself -- and
+         * wait node is not written; nothing reads it after the grant (until
+         * T4, a granted TrySemaphorePPC waiter whose time ran out took that
+         * node off the queue a second time) -- and
          * everything else, shared waiters and messages, chained through
          * their own nodes, which nobody reads after the wake-up. Each link
          * is read before its node is woken (R5). The grants, the order of
@@ -1131,7 +1132,7 @@ PPCFUNCTION VOID myReleaseSemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerP
         if (SemaphorePPC->ssppc_SS.ss_QueueCount != -1)
         {
             handOff = 1;
-            SemaphorePPC->ssppc_lock = 1;
+            SemaphorePPC->ssppc_lock = 1;   //WarpOS's flag for TrySemaphorePPC (powerpc.p:10078, :10185), kept; since T4 TrySemaphorePPC reads ss_Owner and nothing in lib/ reads the flag
             struct SemWait* myWait = (struct SemWait*)myRemHeadPPC(PowerPCBase, (struct List*)&SemaphorePPC->ssppc_SS.ss_WaitQueue);
 
             if (myWait)
@@ -3722,34 +3723,55 @@ PPCFUNCTION LONG myTrySemaphorePPC(__reg("r3") struct PrivatePPCBase* PowerPCBas
 
             ULONG signal = myWaitTime(PowerPCBase, SIGF_SINGLE, timeout);
 
-            while (1)
-            {
-                while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
-                if (!((volatile)SemaphorePPC->ssppc_lock))
-                {
-                    break;
-                }
-                FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
-            }
+            /*
+             * THE OUTCOME IS READ FROM ss_Owner, UNDER pp_Mutex -- T4 (REVIEW-LIB.md),
+             * a deliberate divergence from WarpOS and 17.13b. Both spin until the
+             * releaser clears ssppc_lock, then decide by WaitTime's result
+             * (powerpc.p:13500-13525; ppcfunctions.p:4039-4084). Here that spin
+             * froze the PPC: the releaser's SignalPPC runs an atomic waiter at once
+             * (kernel.c priShouldSwitch, the atomic rule), a running atomic task is
+             * not switched out (SwitchPPC, R3), so the releaser never got back to
+             * clear the lock. WarpOS needs the lock because its releaser writes the
+             * new owner after PERMIT (powerpc.p:10079, :10097). Ours makes every
+             * grant -- our node off the queue, the owner, the nest -- before it
+             * frees pp_Mutex (R1, myReleaseSemaphorePPC), so ss_Owner alone says
+             * whether we were granted; only the wake-up comes later.
+             *
+             * GRANTED: success. The releaser's SIGF_SINGLE may still be on its way;
+             * it is waited for here, so that no later wait takes it for its own.
+             * A timeout that raced the grant counts as the grant: the old code
+             * removed the node a second time and returned failure while owning the
+             * semaphore.
+             *
+             * NOT GRANTED: our node is still queued. It comes off, and the queue
+             * count comes down by the one this call added, as myVacatePPC undoes a
+             * withdrawn waiter (WarpOS the same, powerpc.p:13934-13936). WarpOS,
+             * 17.13b and 17.15 add a nest instead (powerpc.p:13532-13537,
+             * ppcfunctions.p:4092-4095), so the owner's last release kept the
+             * semaphore and the next ObtainSemaphorePPC waited for ever.
+             */
+            while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
 
             ULONG sigMask = signal | myTask->tp_Task.tc_SigRecvd;
+            ULONG gotSignal = sigMask & SIGF_SINGLE;
             sigMask &= ~SIGF_SINGLE;
             myTask->tp_Task.tc_SigRecvd = sigMask;
 
-            if (!(signal & SIGF_SINGLE))
+            if (SemaphorePPC->ssppc_SS.ss_Owner == (struct Task*)myTask)
             {
-                myRemovePPC(PowerPCBase, (struct Node*)&semWait);
-            }
+                FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
 
-            FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
-
-            if (signal & SIGF_SINGLE)
-            {
+                if (!(gotSignal))
+                {
+                    myWaitPPC(PowerPCBase, SIGF_SINGLE);
+                }
                 status = ATTEMPT_SUCCESS;
             }
             else
             {
-                SemaphorePPC->ssppc_SS.ss_NestCount += 1;
+                myRemovePPC(PowerPCBase, (struct Node*)&semWait);
+                SemaphorePPC->ssppc_SS.ss_QueueCount -= 1;
+                FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
                 status = ATTEMPT_FAILURE;
             }
         }
