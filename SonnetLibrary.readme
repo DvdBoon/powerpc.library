@@ -306,6 +306,9 @@ What has changed since 17.15:
   stack not even 8-byte aligned, so AltiVec code keeping vectors on the
   stack read and wrote the wrong bytes. Its stack now starts 32-byte
   aligned, as in WarpOS.
+- The 68k side could freeze the whole machine, with interrupts off, when
+  it read a message from the PPC twice and then found the queue empty.
+  Fixed, as in 17.13b.
 
 What has changed since 17.14:
 

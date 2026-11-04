@@ -1654,12 +1654,23 @@ struct MsgFrame* GetMsgFrame(struct PrivatePPCBase* PowerPCBase)
 {
     struct ExecBase* SysBase = PowerPCBase->pp_PowerPCBase.PPC_SysLib;
     struct killFIFO* myFIFO = (struct killFIFO*)((ULONG)(PowerPCBase->pp_PPCMemBase + FIFO_END));
-    ULONG msgFrame = -1;
+    ULONG msgFrame;
 
     Disable();
 
     while (1)
     {
+        /*
+         * EVERY PASS STARTS EMPTY (M1, REVIEW-LIB.md). The Harrier and Killer
+         * arms leave msgFrame alone on an empty queue, and it was set to -1
+         * once, before the loop: a pass that read a duplicate of
+         * kf_GetPrevious and then found the queue empty kept the duplicate
+         * and went round for ever, under Disable. 17.13b sets -1 on every
+         * empty pass (powerpc.s:2937-2939, :2948-2950): THIS MATCHES. NO
+         * COUNTERPART in WarpOS, which has no frame queues.
+         */
+        msgFrame = -1;
+
         switch (PowerPCBase->pp_DeviceID)
         {
             case DEVICE_HARRIER:
