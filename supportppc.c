@@ -852,12 +852,62 @@ PPCFUNCTION VOID FreeAllExcMem(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
 
 PPCFUNCTION VOID AddExcList(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct ExcInfo* excInfo, __reg("r5") struct ExcData* newData, __reg("r6") ULONG* currExc, __reg("r7") ULONG flag)
 {
+    /*
+     * FILLS THE ENTRY AND RECORDS IT IN excInfo; LinkExcList below links it
+     * (E1, REVIEW-LIB.md). This added each entry to pp_ReadyExc at once.
+     * SetExcHandler's next AllocVec68K is a 68k round trip, so meanwhile the
+     * kernel's decrementer arm could move the entry onto a live list
+     * (kernel.c:338-362). If a later allocation failed, FreeAllExcMem freed
+     * it still linked, and the next exception of its type called its
+     * handler through freed memory. 17.15 has it (src_175/supportppc.c:781-788).
+     */
     myCopyMemPPC(PowerPCBase, (APTR)excInfo, (APTR)newData, sizeof(struct ExcData));
     currExc[0] = (ULONG)newData;
     newData->ed_ExcID = flag;
     excInfo->ei_ExcData.ed_LastExc = newData;
+    return;
+}
+
+/********************************************************************************************
+*
+*
+*
+*********************************************************************************************/
+
+PPCFUNCTION VOID LinkExcList(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct ExcInfo* excInfo)
+{
+    /*
+     * EVERY ENTRY AT ONCE, AFTER THE LAST ALLOCATION (E1): one pp_Mutex
+     * section adds each entry AddExcList recorded to pp_ReadyExc, in
+     * SetExcHandler's allocation order, so pp_ReadyExc ends as it did.
+     * MATCHES WarpOS, which links only after every allocation succeeded,
+     * under FORBID (powerpc.p:11424-11428, InsExcHandler :2300), and
+     * 17.13b's .MakeLists under its atomic lock (ppcfunctions.p:9021-9035,
+     * :9077), onto the same pending list.
+     */
+    struct Node* entry[12];
+
+    entry[0]  = excInfo->ei_MachineCheck;
+    entry[1]  = excInfo->ei_DataAccess;
+    entry[2]  = excInfo->ei_InstructionAccess;
+    entry[3]  = excInfo->ei_Interrupt;
+    entry[4]  = excInfo->ei_Alignment;
+    entry[5]  = excInfo->ei_Program;
+    entry[6]  = excInfo->ei_FPUnavailable;
+    entry[7]  = excInfo->ei_Decrementer;
+    entry[8]  = excInfo->ei_SystemCall;
+    entry[9]  = excInfo->ei_Trace;
+    entry[10] = excInfo->ei_PerfMon;
+    entry[11] = excInfo->ei_IABR;
+
     while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
-    myAddHeadPPC(PowerPCBase, (struct List*)&PowerPCBase->pp_ReadyExc, (struct Node*)newData);
+    for (int i = 0; i < 12; i++)
+    {
+        if (entry[i])
+        {
+            myAddHeadPPC(PowerPCBase, (struct List*)&PowerPCBase->pp_ReadyExc, entry[i]);
+        }
+    }
     FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
     return;
 }

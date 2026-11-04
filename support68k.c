@@ -529,9 +529,15 @@ LONG ReadFunc(__reg("d1") BPTR readhandle, __reg("d2") APTR buffer, __reg("d3") 
     {
         if ((myBuffer[0] == HUNK_HEADER) && (myBuffer[1] == NULL) && (myBuffer[3] == NULL) && (myBuffer[2] - myBuffer[4] - 1 == NULL))
         {
+            /*
+             * THE TWO EXCEPTIONS 17.13b HAS (powerpc.s:3506-3522): programs
+             * whose first hunk is not marked FAST, so they load entirely into
+             * PPC memory. 17.15 added a third, the hunk sizes of one build of
+             * the Radeon driver (0x9468, 0x4F3); removed on the user's word,
+             * 4 Nov 2026. WarpOS has no loader patch at all.
+             */
             if (((myBuffer[5] == 0x71E) && (myBuffer[6] == 0x710)) ||  //Cybermand
-                ((myBuffer[5] == 0x84E) && (myBuffer[6] == 0xEE)) ||  //CyberPi
-                ((myBuffer[5] == 0x9468) && (myBuffer[6] == 0x4F3))) //Radeon
+                ((myBuffer[5] == 0x84E) && (myBuffer[6] == 0xEE)))     //CyberPi
             {
                 return result;
             }

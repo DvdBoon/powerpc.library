@@ -2120,11 +2120,13 @@ PPCFUNCTION APTR mySetExcHandler(__reg("r3") struct PrivatePPCBase* PowerPCBase,
 
     if (flag)
     {
-        FreeAllExcMem(PowerPCBase, excInfo);
+        FreeAllExcMem(PowerPCBase, excInfo);    //E1: nothing is linked yet, so freeing is safe
         FreeVec68K(PowerPCBase, excInfo);
         printDebug(PowerPCBase, (struct DebugArgs*)&args);
         return NULL;
     }
+
+    LinkExcList(PowerPCBase, excInfo);          //E1: every entry at once, after the last allocation (supportppc.c)
 
     CauseDECInterrupt(PowerPCBase);
 

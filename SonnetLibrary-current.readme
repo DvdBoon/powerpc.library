@@ -310,6 +310,13 @@ What has changed since 17.15:
   its timer behind. When the time ran out, the kernel wrote to the
   deleted task, and into freed memory once the task had been cleaned up.
   The timer is now removed with the task.
+- A SetExcHandler() that failed could leave a freed handler active, so the
+  next exception of its type called freed memory. The handlers are now
+  handed to the kernel only after every allocation has succeeded, as in
+  WarpOS.
+- The program loader no longer makes an exception for one build of the
+  Radeon driver; that build is now loaded like any program the loader has
+  no exception for.
 
 What has changed since 17.14:
 
