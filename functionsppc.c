@@ -711,6 +711,26 @@ PPCFUNCTION VOID myDeleteTaskPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase,
         PPCtask = myTask;
     }
 
+    /*
+     * ONE TEARDOWN PER TASK (W3, REVIEW-LIB.md). Kryten (supportppc.c
+     * SystemStart) deletes a crashed task its parent may already have
+     * deleted: the second call returns here, before the snoops, the port
+     * and ID_END are done again. The flag is tested and set under
+     * pp_SemTaskList, which every DeleteTaskPPC takes. The task list and
+     * the count follow tp_TaskPtr below, which the first removal clears --
+     * here, or in CommonExcError for a crashed task. 17.13b's Kryten never
+     * calls DeleteTaskPPC (ppcfunctions.p:9905-9944); WarpOS has no Kryten.
+     */
+    myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemTaskList);
+    ULONG wasDeleted = PPCtask->tp_Flags & TASKPPCF_DELETED;
+    PPCtask->tp_Flags |= TASKPPCF_DELETED;
+    myReleaseSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemTaskList);
+
+    if (wasDeleted)
+    {
+        return;
+    }
+
     myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemSnoopList);
 
     struct SnoopData* currSnoop = (struct SnoopData*)PowerPCBase->pp_Snoop.mlh_Head;
@@ -741,9 +761,9 @@ PPCFUNCTION VOID myDeleteTaskPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase,
     if (PPCtask->tp_TaskPtr)
     {
         myRemovePPC(PowerPCBase, (struct Node*)PPCtask->tp_TaskPtr);
+        PPCtask->tp_TaskPtr = NULL;                     //W3: removed and counted once
+        PowerPCBase->pp_NumAllTasks -= 1;
     }
-
-    PowerPCBase->pp_NumAllTasks -= 1;
 
     myReleaseSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemTaskList);
 

@@ -2906,6 +2906,23 @@ PPCKERNEL void CommonExcError(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
 
     PowerPCBase->pp_ThisPPCProc->tp_Task.tc_State = TS_REMOVED;
     PowerPCBase->pp_ThisPPCProc->tp_Flags |= TASKPPCF_CRASHED;
-    RemovePPC((struct Node*)PowerPCBase->pp_ThisPPCProc->tp_TaskPtr);
+    /*
+     * OFF THE TASK LIST ONCE (W3, REVIEW-LIB.md). The crashed task leaves
+     * pp_AllTasks here and is counted out here, and tp_TaskPtr is cleared:
+     * the DeleteTaskPPC that Kryten (supportppc.c SystemStart) or its parent
+     * runs on it later must not remove it again through its stale links --
+     * that cut out whatever task had been added after it -- nor count it
+     * out twice. A crashed 68k-started task, which Kryten frees without
+     * DeleteTaskPPC, was never counted out at all. WarpOS keeps a crashed
+     * task in the list, waiting for ever until its parent deletes it
+     * (powerpc.p:7960-7973); the user chose 17.15's automatic cleanup, done
+     * once: THIS DIVERGES. Test: tests/crashtask.
+     */
+    if (PowerPCBase->pp_ThisPPCProc->tp_TaskPtr)
+    {
+        RemovePPC((struct Node*)PowerPCBase->pp_ThisPPCProc->tp_TaskPtr);
+        PowerPCBase->pp_ThisPPCProc->tp_TaskPtr = NULL;
+        PowerPCBase->pp_NumAllTasks -= 1;
+    }
     SwitchPPC(PowerPCBase, iframe);
 }

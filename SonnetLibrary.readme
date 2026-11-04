@@ -309,6 +309,10 @@ What has changed since 17.15:
 - The 68k side could freeze the whole machine, with interrupts off, when
   it read a message from the PPC twice and then found the queue empty.
   Fixed, as in 17.13b.
+- A PPC task that crashed was taken off the task list twice, which could
+  cut another task out of it, and its port was freed twice if its parent
+  had already deleted it, often halting the machine. A crashed task is now
+  torn down once.
 
 What has changed since 17.14:
 

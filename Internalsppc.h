@@ -65,10 +65,12 @@ void counter(ULONG) = "\tlwzx\tr4,r0,r3\n\taddi\tr4,r4,1\n\tstwx\tr4,r0,r3\n";
 #undef TASKPPCF_ATOMIC
 #define TASKPPCB_EMULATOR   4
 #define TASKPPCB_ATOMIC     5
+#define TASKPPCB_DELETED    13      //W3: DeleteTaskPPC has torn this task down
 #define TASKPPCB_CREATORPPC 14
 #define TASKPPCB_CRASHED    15
 #define TASKPPCF_EMULATOR   (1L<<4)
 #define TASKPPCF_ATOMIC     (1L<<5)
+#define TASKPPCF_DELETED    (1L<<13)
 #define TASKPPCF_CREATORPPC (1L<<14)
 #define TASKPPCF_CRASHED    (1L<<15)
 
