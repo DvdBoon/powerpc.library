@@ -295,6 +295,10 @@ What has changed since 17.15:
 - prometheus.library is now tried before pci.library: with a
   FireStorm/Firebird board present, that bridge is used; otherwise the
   Mediator, as before.
+- A function started with RunPPC() from the 68k side could begin with its
+  stack not even 8-byte aligned, so AltiVec code keeping vectors on the
+  stack read and wrote the wrong bytes. Its stack now starts 32-byte
+  aligned, as in WarpOS.
 
 What has changed since 17.14:
 

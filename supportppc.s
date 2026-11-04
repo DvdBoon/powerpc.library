@@ -158,9 +158,20 @@ _RunCPP:
         mr.     r8,r8
         beq    .noStack
 
+#   THE CALLEE'S r1 32-ALIGNED (Q6, REVIEW-LIB.md), as WarpOS rounds it down
+#   to 32 (powerpc.p:15141-15145). Below this frame go the stack arguments,
+#   below them the 24-byte linkage area, and the result is rounded down; the
+#   arguments are copied to 24(r1), WarpOS's LINKAREASIZE (powerpc.p:11), and
+#   0(r1) chains back to this frame for the "lwz r1,0(r1)" after the call.
+#   17.13b's fixed sizes (the -68, "make sure stack is aligned on 32",
+#   ppcfunctions.p:10331) fit its own frames only: here the callee got
+#   r1 = 12 mod 32. Test: tests/stackalign.
+
         mr      r9,r1
         sub     r1,r1,r8
-        subi    r10,r1,1
+        subi    r1,r1,24
+        clrrwi  r1,r1,5
+        addi    r10,r1,23               #the copy's stbu pre-increments: to 24(r1)
         subi    r11,r7,1
 
 .copyStack:
@@ -170,12 +181,14 @@ _RunCPP:
         mr.     r8,r8
         bne     .copyStack
 
-        subi    r1,r1,24
         stw     r9,0(r1)
         b       .doneStack
 
 .noStack:
-        stwu    r1,-68(r1)
+        mr      r9,r1
+        subi    r1,r1,68
+        clrrwi  r1,r1,5                 #32-aligned, as above
+        stw     r9,0(r1)
 .doneStack:
         mr      r14,r5
         mtlr    r4
