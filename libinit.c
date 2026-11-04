@@ -349,7 +349,44 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
 
     myConsts->ic_ExpansionBase = ExpansionBase;
 
-    if ((FindConfigDev(NULL, VENDOR_ELBOX, MEDIATOR_MKII)) || (FindConfigDev(NULL, VENDOR_ELBOX, MEDIATOR_MKIII)))
+    /*
+     * PROMETHEUS FIRST. The user, 3 Nov 2026: "prometheus.library is tested
+     * first for existence before pci.library". If prometheus.library opens
+     * and a Firestorm/Firebird board is there, that bridge is used. If it
+     * opens without such a board, it is closed again and the Mediator is
+     * looked for, as before; a Firestorm whose library will not open is
+     * still refused with that library's name, below. 17.15 looked for a
+     * Mediator first. NO COUNTERPART: WarpOS has no PCI bridge, and 17.13b
+     * knows only the Mediator (powerpc.s:150-226).
+     */
+    if (PrometheusBase = OpenLibrary("prometheus.library",VERPCIP))
+    {
+        myConsts->ic_PciBase = (struct PciBase*)PrometheusBase;    //at once, so every exit closes it (L1)
+
+        if (!(cd = FindConfigDev(NULL, VENDOR_E3B, PROMETHEUS_FIRESTORM)))
+        {
+            CloseLibrary(PrometheusBase);                           //no board: on to the Mediator
+            PrometheusBase       = NULL;
+            myConsts->ic_PciBase = NULL;
+        }
+    }
+
+    if (cd)
+    {
+        myConsts->ic_pciType = VENDOR_E3B;
+
+        D(("Detected Firestorm/Firebird PCI bridge\n"));
+
+        if (PrometheusBase->lib_Revision < REVPCIP)
+        {
+            PrintCrtErr(myConsts, "Could not open prometheus.library V4.5+");
+            return NULL;
+        }
+
+        offset = (ULONG)cd->cd_BoardAddr;
+    }
+
+    else if ((FindConfigDev(NULL, VENDOR_ELBOX, MEDIATOR_MKII)) || (FindConfigDev(NULL, VENDOR_ELBOX, MEDIATOR_MKIII)))
     {
         if (!(cd = FindConfigDev(NULL, VENDOR_ELBOX, MEDIATOR_LOGIC)))
         {
@@ -390,27 +427,10 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
         }
     }
 
-    else if (cd = FindConfigDev(NULL, VENDOR_E3B, PROMETHEUS_FIRESTORM))
+    else if (FindConfigDev(NULL, VENDOR_E3B, PROMETHEUS_FIRESTORM))
     {
-        myConsts->ic_pciType = VENDOR_E3B;
-
-        D(("Detected Firestorm/Firebird PCI bridge\n"));
-
-        if (!(PrometheusBase = OpenLibrary("prometheus.library",VERPCIP)))
-        {
-            PrintCrtErr(myConsts, "Could not open prometheus.library V4+");
-            return NULL;
-        }
-
-        myConsts->ic_PciBase = (struct PciBase*)PrometheusBase;    //before the revision test, so its exit closes it (L1)
-
-        if (PrometheusBase->lib_Revision < REVPCIP)
-        {
-            PrintCrtErr(myConsts, "Could not open prometheus.library V4.5+");
-            return NULL;
-        }
-
-        offset = (ULONG)cd->cd_BoardAddr;
+        PrintCrtErr(myConsts, "Could not open prometheus.library V4+");    //a Firestorm without its library
+        return NULL;
     }
 
     else

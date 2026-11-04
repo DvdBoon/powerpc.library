@@ -2537,6 +2537,49 @@ PPCKERNEL VOID FlushDCache(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 *
 *********************************************************************************************/
 
+PPCKERNEL ULONG KCachedLine(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") ULONG line)
+{
+    /*
+     * A LINE THE PPC'S DATA CACHE CAN HOLD (C2, REVIEW-LIB.md). SetCache's
+     * ranged operations run here, in the trap, on the caller's addresses,
+     * and a fault in the trap is a nested exception (K1). The PPC caches
+     * only its system memory, copyback through the page table, and BAT1's
+     * gfx window, write-through (setupppc.c:308-312, :358-364). Any other
+     * address is either unmapped -- Amiga memory, which the PPC reaches only
+     * through the proxy and never caches: dcbf, dcbi or icbi there faulted,
+     * killing the caller and leaving the exception depth at 1 -- or
+     * cache-inhibited (BAT2, BAT3, the registers). Below 2 MB the trap sees
+     * BAT0, the kernel's own memory (setupppc.c:315-318), which a caller's
+     * chip RAM address only aliases: DCACHEINV there discarded the kernel's
+     * unwritten lines. WarpOS (DCacheFlushArea, DCacheInvArea,
+     * ICacheInvArea, DCacheLockArea: warp.p:195, :364, :612, :454) and
+     * 17.13b (ppcfunctions.p:405, :174, :364) check no address, as Amiga
+     * RAM is mapped there: THIS DIVERGES, rightly. Test: tests/cacherange.
+     */
+    ULONG dbatu = PowerPCBase->pp_SystemBATs[1].ba_dbatu;
+
+    if (line < 0x200000)
+    {
+        return FALSE;                               //BAT0: the kernel's 2 MB
+    }
+    if ((line - (PowerPCBase->pp_PPCMemBase + OFFSET_SYSMEM)) < (PowerPCBase->pp_PPCMemSize - OFFSET_SYSMEM))
+    {
+        return TRUE;                                //system memory
+    }
+    if ((dbatu & (BAT_VALID_SUPERVISOR | BAT_VALID_USER)) &&
+        ((line - (dbatu & 0xfffe0000)) < ((((dbatu >> 2) & 0x7ff) + 1) << 17)))
+    {
+        return TRUE;                                //BAT1: BEPI, and (BL + 1) blocks of 128 KB
+    }
+    return FALSE;
+}
+
+/********************************************************************************************
+*
+*
+*
+*********************************************************************************************/
+
 PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") ULONG flags, __reg("r5") APTR start, __reg("r6") ULONG length)
 {
     ULONG value;
@@ -2577,7 +2620,10 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
 
                 for (int i = 0; i < iterations; i++)
                 {
-                    loadWord(mem);
+                    if (KCachedLine(PowerPCBase, mem))      //C2
+                    {
+                        loadWord(mem);
+                    }
                     mem += CACHELINE_SIZE;
                 }
 
@@ -2612,7 +2658,10 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
 
                         for (int i = 0; i < iterations; i++)
                         {
-                            dFlush(mem);
+                            if (KCachedLine(PowerPCBase, mem))      //C2
+                            {
+                                dFlush(mem);
+                            }
                             mem += CACHELINE_SIZE;
                         }
                         sync();
@@ -2676,7 +2725,10 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
 
                     for (int i = 0; i < iterations; i++)
                     {
-                        dInval(mem);
+                        if (KCachedLine(PowerPCBase, mem))          //C2
+                        {
+                            dInval(mem);
+                        }
                         mem += CACHELINE_SIZE;
                     }
                     sync();
@@ -2705,7 +2757,10 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
 
                 for (int i = 0; i < iterations; i++)
                 {
-                    iInval(mem);
+                    if (KCachedLine(PowerPCBase, mem))              //C2
+                    {
+                        iInval(mem);
+                    }
                     mem += CACHELINE_SIZE;
                 }
                 isync();

@@ -295,6 +295,13 @@ What has changed since 17.15:
   message frame that was still in use, losing a write or corrupting
   memory. The PPC now waits for a free frame, and the 68k side never takes
   an empty queue for a frame.
+- SetCache() on memory the PPC cannot reach, such as Amiga fast RAM or the
+  ROM, killed the calling task and slowed every later exception; on a chip
+  RAM address an invalidate could damage the library's own memory. It now
+  acts only on memory the PPC can cache.
+- prometheus.library is now tried before pci.library: with a
+  FireStorm/Firebird board present, that bridge is used; otherwise the
+  Mediator, as before.
 
 What has changed since 17.14:
 
