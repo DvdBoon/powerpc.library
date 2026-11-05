@@ -1029,33 +1029,62 @@ FUNC68K void MasterControl(void)
 				{
 					case ID_T68K:
 					{
+                        /*
+                         * THE MIRROR'S NAME IS SIZED TO THE TASK'S, AND A START THAT FAILS IS
+                         * TRIED AGAIN -- P5 (REVIEW-LIB.md).
+                         *
+                         * The name was built in a fixed 255-byte buffer through a UBYTE
+                         * index. A PPC task name of 256 characters or more wrapped the index
+                         * and never reached its end, so MasterControl looped for ever at
+                         * priority 1 and starved every task at priority 0 or below; 251-255
+                         * characters wrote past the buffer. WarpOS sizes it StrLen + 5
+                         * (Create68KProc, powerpc.p:16008-16034), and 17.13b the same on its
+                         * stack (MsgMir68, powerpc.s:2062-2075). The buffer is freed once the
+                         * process exists: DOS copies NP_Name, which the stack buffer here and
+                         * 17.13b's already relied on. It is taken with TF_PPC clear, in Amiga
+                         * memory as that stack buffer was.
+                         *
+                         * A CreateNewProcTags that failed showed a requester and dropped the
+                         * frame, so the PPC task waited in myWaitFor68K for ever. Now
+                         * MasterControl waits a second and tries again. 17.13b retries at
+                         * once (powerpc.s:2089), which spins at this priority for as long as
+                         * memory is short; WarpOS does not check the process
+                         * (powerpc.p:15966).
+                         */
                         char *ppcName = myFrame->mf_PPCTask->tp_Task.tc_Node.ln_Name;
-						char Name68k[255];
 						char nameAppend[] = "_68K\0";
+						ULONG nameLen = 0;
+						char *Name68k;
+						struct Process* myProc;
 
-						UBYTE offset = 0;
-						while (Name68k[offset] = ppcName[offset])
+						while (ppcName[nameLen])
 						{
-							offset++;
+							nameLen++;
 						}
 
-						CopyMem(&nameAppend, &Name68k[offset], 5);
-
-						struct Process* myProc;
 						myTask->tc_Flags &= ~TF_PPC;
-						myProc = CreateNewProcTags(
+
+						while (!(Name68k = AllocVec(nameLen + 5, MEMF_PUBLIC)))
+						{
+							Delay(50);
+						}
+
+						CopyMem(ppcName, Name68k, nameLen);
+						CopyMem(&nameAppend, &Name68k[nameLen], 5);
+
+						while (!(myProc = CreateNewProcTags(
 						NP_Entry, (ULONG)&MirrorTask,
-						NP_Name, &Name68k,
+						NP_Name, (ULONG)Name68k,
 						NP_Priority, 0,
 						NP_StackSize, 0x20000,
-						TAG_DONE);
+						TAG_DONE)))
+						{
+							Delay(50);
+						}
+
+						FreeVec(Name68k);
 						myTask->tc_Flags |= TF_PPC;
 
-						if(!(myProc))
-						{
-							PrintError(SysBase, "Could not start 68K mirror process");
-							break;
-						}
 						myProc->pr_Task.tc_UserData = (APTR)myFrame;
 						/*
 						 * OR, NEVER ASSIGN -- FIXES.md item 19, and this was
