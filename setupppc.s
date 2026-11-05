@@ -273,8 +273,14 @@ _getL2Size:
         cmpwi   r8,L2_SIZE_QM
         beq     .L2SizeDone
 
-        lis     r7,0
-        mr      r8,r5
+        lis     r7,0                    #No size bits: the L2CR keeps the 1 MB it was set to
+        li      r8,L2_SIZE_1M           #S2 (REVIEW-LIB.md): 1 MB in 256-byte lines, that size.
+                                        #This was "mr r8,r5", 0x100000 BYTES where a line count
+                                        #is returned, which setupCaches makes a 256 MB L2: the
+                                        #whole-cache flush then ran past memory. 17.13b keeps the
+                                        #measured count (setupppc.p:1185-1201). WarpOS sizes no L2;
+                                        #its L1 lookup keeps a safe maximum when the CPU is not in
+                                        #its table (warpos/hal/warp.p:2840-2858)
 
 .L2SizeDone:
         stw     r7,0(r3)

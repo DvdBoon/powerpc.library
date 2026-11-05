@@ -338,6 +338,10 @@ What has changed since 17.15:
   behind, and its next RunPPC() had the PPC build a task at a random
   address, which crashed or froze the machine. A failed first call now
   leaves nothing behind.
+- When the size of the L2 cache could not be measured at startup, the
+  library took it as 256 MB, and every flush of the whole data cache then
+  crashed the program that asked for it. A failed measurement now gives
+  1 MB, the size the L2 is set to.
 
 What has changed since 17.14:
 
