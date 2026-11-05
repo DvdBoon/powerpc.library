@@ -338,7 +338,16 @@ void commonRemTask(__reg("a1") struct Task* myTask, __reg("d0") ULONG flag, __re
         {
             if (currMir->mt_Task == myTask)
             {
-                if (!(flag))
+                /*
+                 * ONLY A PPC TASK THAT EXISTS IS ENDED -- M3 (REVIEW-LIB.md). An
+                 * entry whose first call never came back has no PPC task, and
+                 * HandleMsgs (kernel.c) routes ID_END through mf_PPCTask: NULL
+                 * was dereferenced there. NO COUNTERPART in WarpOS, whose entry
+                 * always holds its PPC process (CreatePPCProc runs before
+                 * CreateCoreEntry, powerpc.s:3754-3755, :3816) and whose RemTask
+                 * patch signals it (:5039-5041).
+                 */
+                if ((!(flag)) && (currMir->mt_PPCTask))
                 {
                     struct MsgFrame* myFrame = CreateMsgFrame(PowerPCBase);
                     myFrame->mf_Identifier = ID_END;

@@ -162,10 +162,10 @@ LIBFUNC68K ULONG myReserved(void)
 
 LIBFUNC68K LONG myCRunPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __reg("a0") struct PPCArgs* PPStruct)
 {
-    ULONG  stackMem, stackSize, taskName;
+    ULONG  stackMem, stackSize = 0, taskName;   //M3: stackSize and newPPCTask are set by a first call only; the kernel reads them only for a new task
     APTR   stackPP;
     UWORD  cmndSize;
-    struct NewTask* newPPCTask;
+    struct NewTask* newPPCTask = NULL;
     struct CommandLineInterface* comLineInt;
     STRPTR cmndName;
 
@@ -194,36 +194,95 @@ LIBFUNC68K LONG myCRunPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __reg(
         myMirror = nxtMirror;
     }
 
+    /*
+     * THE CALL'S OWN CHECKS COME FIRST, AND A NEW MIRROR ENTRY IS LISTED LAST
+     * -- M3 (REVIEW-LIB.md). The entry of a first call was put on
+     * pp_MirrorList before the task's memory was allocated and before the
+     * PP_Stack checks below. When one of those failed, the call returned
+     * PPERR_MISCERR and left the entry listed with no PPC task: the next call
+     * found it, skipped this setup, and sent a frame with the task address
+     * and stack size never set, and DispatchPPC (kernel.c) built a task
+     * there. The frame and the task memory leaked. A first call with
+     * PP_Stack and PPF_ASYNC did it every time.
+     *
+     * Now the stack checks and the stack copy come before anything is made,
+     * and a first call lists its entry only when the entry, its port and the
+     * task memory all exist; a failure frees what was made and puts back the
+     * caller's TF_PPC bit as it found it. WarpOS's CreateCoreEntry lists its
+     * entry last the same way, freeing its parts on a failure
+     * (powerpc.s:3800-3833). 17.13b had this hole (powerpc.s:3640-3657,
+     * :3726). A failure still returns PPERR_MISCERR, where WarpOS's RunPPC
+     * returns PPERR_SUCCESS without running the call (powerpc.s:827-828,
+     * :914-917).
+     *
+     * THE CALLER'S PPCArgs IS NOT WRITTEN, apart from the registers coming
+     * back (myWaitForPPC) -- REVIEW-LIB.md M2. The copy of the stack
+     * arguments, in PPC memory, goes in the FRAME, and this function frees
+     * it once the call is over. It used to replace the caller's PP_Stack
+     * with the copy, or with NULL, and the reply freed it there, so PP_Stack
+     * came back pointing at freed memory; 17.13b does the same
+     * (powerpc.s:3756-3757, :3774, :3897-3903). WarpOS hands the caller's
+     * struct back as it went in (powerpc.s:3952-3955, :4148-4151): THIS
+     * MATCHES. A local, not a field of the mirror, so that a nested RunPPC
+     * from a Run68K callback keeps its own.
+     */
+    stackPP = NULL;
+
+    if ((PPStruct->PP_Stack) && (PPStruct->PP_StackSize))
+    {
+        if (PPStruct->PP_Flags == PPF_ASYNC)
+        {
+            return (PPERR_MISCERR);
+        }
+        if (!(stackPP = AllocVec32(PPStruct->PP_StackSize, MEMF_PUBLIC|MEMF_PPC|MEMF_REVERSE)))
+        {
+            return (PPERR_MISCERR);
+        }
+        CopyMem((const APTR)PPStruct->PP_Stack, stackPP, PPStruct->PP_StackSize);
+    }
+
     if (!(nxtMirror))
     {
-        thisTask->tc_Flags &= ~TF_PPC;
+        ULONG hadPPC = thisTask->tc_Flags & TF_PPC;     //put back as found if the setup fails
+
+        thisTask->tc_Flags &= ~TF_PPC;                  //the entry and its port in Amiga memory
 
         if (!(myMirror = (struct MirrorTask*)AllocVec(sizeof(struct MirrorTask), (MEMF_PUBLIC | MEMF_CLEAR))))
         {
+            thisTask->tc_Flags |= hadPPC;
+            if (stackPP)
+            {
+                FreeVec32(stackPP);
+            }
             return (PPERR_MISCERR);
         }
 
         if(!(myMirror->mt_Port = CreateMsgPort()))
         {
+            FreeVec(myMirror);
+            thisTask->tc_Flags |= hadPPC;
+            if (stackPP)
+            {
+                FreeVec32(stackPP);
+            }
             return (PPERR_MISCERR);
         }
 
-        thisTask->tc_Flags |= TF_PPC;
-
         myMirror->mt_Task    = thisTask;
         myMirror->mt_PPCTask = NULL;
-
-        Disable();
-
-        AddHead((struct List*)&PowerPCBase->pp_MirrorList, (struct Node*)myMirror);
-
-        Enable();
 
         stackSize = ((((ULONG)(thisTask->tc_SPUpper) - (ULONG)(thisTask->tc_SPLower)) | 0x80000) & -128);
 
         if (!(stackMem = (ULONG)AllocVec32((stackSize + 2048), MEMF_PUBLIC | MEMF_PPC | MEMF_REVERSE)))
         {
-           return (PPERR_MISCERR);
+            DeleteMsgPort(myMirror->mt_Port);
+            FreeVec(myMirror);
+            thisTask->tc_Flags |= hadPPC;
+            if (stackPP)
+            {
+                FreeVec32(stackPP);
+            }
+            return (PPERR_MISCERR);
         }
 
         newPPCTask = (struct NewTask*)stackMem;
@@ -265,6 +324,14 @@ LIBFUNC68K LONG myCRunPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __reg(
         }
         ULONG appendix = (ULONG)&destName[pointer];
         *((ULONG*)(appendix)) = ID_PPC;
+
+        thisTask->tc_Flags |= TF_PPC;
+
+        Disable();
+
+        AddHead((struct List*)&PowerPCBase->pp_MirrorList, (struct Node*)myMirror);     //M3: listed last, once all it needs exists
+
+        Enable();
     }
 
     struct MsgFrame* myFrame = CreateMsgFrame(PowerPCBase);
@@ -280,33 +347,6 @@ LIBFUNC68K LONG myCRunPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __reg(
     myFrame->mf_Arg[0]                  = (ULONG)newPPCTask;
     myFrame->mf_Arg[1]                  = thisTask->tc_SigAlloc;
     myFrame->mf_Arg[2]                  = (ULONG)thisTask;
-
-    /*
-     * THE CALLER'S PPCArgs IS NOT WRITTEN, apart from the registers coming
-     * back (myWaitForPPC) -- REVIEW-LIB.md M2. The copy of the stack
-     * arguments, in PPC memory, goes in the FRAME, and this function frees
-     * it once the call is over. It used to replace the caller's PP_Stack
-     * with the copy, or with NULL, and the reply freed it there, so PP_Stack
-     * came back pointing at freed memory; 17.13b does the same
-     * (powerpc.s:3756-3757, :3774, :3897-3903). WarpOS hands the caller's
-     * struct back as it went in (powerpc.s:3952-3955, :4148-4151): THIS
-     * MATCHES. A local, not a field of the mirror, so that a nested RunPPC
-     * from a Run68K callback keeps its own.
-     */
-    stackPP = NULL;
-
-    if ((PPStruct->PP_Stack) && (PPStruct->PP_StackSize))
-    {
-        if (PPStruct->PP_Flags == PPF_ASYNC)
-        {
-            return (PPERR_MISCERR);
-        }
-        if (!(stackPP = AllocVec32(PPStruct->PP_StackSize, MEMF_PUBLIC|MEMF_PPC|MEMF_REVERSE)))
-        {
-            return (PPERR_MISCERR);
-        }
-        CopyMem((const APTR)PPStruct->PP_Stack, stackPP, PPStruct->PP_StackSize);
-    }
 
 //    MyCopy((APTR)PPStruct, &myFrame->mf_PPCArgs, (sizeof(struct PPCArgs)/4)-1);
 

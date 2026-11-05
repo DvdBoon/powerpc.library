@@ -326,6 +326,11 @@ What has changed since 17.15:
   buffer. When there was too little memory to start the task's 68k side,
   a requester appeared and the task waited for ever. Names of any length
   now work, and a failed start is tried again every second.
+- A program whose first RunPPC() failed, for want of memory or because
+  it passed stack arguments with PPF_ASYNC, left a half-made entry
+  behind, and its next RunPPC() had the PPC build a task at a random
+  address, which crashed or froze the machine. A failed first call now
+  leaves nothing behind.
 
 What has changed since 17.14:
 
