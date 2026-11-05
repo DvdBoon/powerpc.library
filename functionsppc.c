@@ -2190,7 +2190,19 @@ PPCFUNCTION APTR mySetExcHandler(__reg("r3") struct PrivatePPCBase* PowerPCBase,
 
     CauseDECInterrupt(PowerPCBase);
 
-    while (!((volatile)excInfo->ei_ExcData.ed_LastExc->ed_Flags & EXCF_ACTIVE));
+    /*
+     * E2: NO ENTRY, NO WAIT. An EXCATTR_EXCID with none of the twelve bits
+     * above (EXCF_ALTIVECUNAV alone, or an EXCB_ number used as a mask)
+     * makes no entry, so ed_LastExc stays NULL, and the wait read through
+     * it: the task was killed, or under NoZeroGuard it spun for ever.
+     * MATCHES WarpOS (powerpc.p:11432-11433) and 17.13b
+     * (ppcfunctions.p:9041-9042), which skip the wait and return the
+     * handle. RemExcHandler below frees such a handle at once.
+     */
+    if (excInfo->ei_ExcData.ed_LastExc)
+    {
+        while (!((volatile)excInfo->ei_ExcData.ed_LastExc->ed_Flags & EXCF_ACTIVE));
+    }
 
     args.db_Arg[0] = (ULONG)excInfo;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
@@ -2213,19 +2225,32 @@ PPCFUNCTION VOID myRemExcHandler(__reg("r3") struct PrivatePPCBase* PowerPCBase,
 
     if (xlock)
     {
-        while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
-
-        myAddHeadPPC(PowerPCBase,(struct List*)&PowerPCBase->pp_RemovedExc, (struct Node*)xlock);
-
-        FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
-
-        CauseDECInterrupt(PowerPCBase);
-
         struct ExcInfo* myInfo = xlock;
 
-        while ((volatile)myInfo->ei_ExcData.ed_LastExc->ed_Flags & EXCF_ACTIVE);
+        /*
+         * E2: A HANDLE WITH NO ENTRY WAS NEVER LINKED (SetExcHandler above),
+         * so it is freed at once. Queued for the kernel, its NULL ed_LastExc
+         * would be written through by the removal (kernel.c:379-380) and
+         * read by the wait below. BEYOND BOTH ORIGINALS: their RemExcHandler
+         * waits on that entry with no test (powerpc.p:11487-11491;
+         * ppcfunctions.p:8557-8560), and 17.13b's kernel writes through it as
+         * kernel.c does (setupppc.p:4450-4454); WarpOS's kernel tests each
+         * entry (powerpc.p:4313-4318).
+         */
+        if (myInfo->ei_ExcData.ed_LastExc)
+        {
+            while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
 
-        FreeAllExcMem(PowerPCBase, myInfo);
+            myAddHeadPPC(PowerPCBase,(struct List*)&PowerPCBase->pp_RemovedExc, (struct Node*)xlock);
+
+            FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
+
+            CauseDECInterrupt(PowerPCBase);
+
+            while ((volatile)myInfo->ei_ExcData.ed_LastExc->ed_Flags & EXCF_ACTIVE);
+
+            FreeAllExcMem(PowerPCBase, myInfo);
+        }
 
         FreeVec68K(PowerPCBase, xlock);
     }

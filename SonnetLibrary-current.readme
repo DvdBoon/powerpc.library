@@ -342,6 +342,9 @@ What has changed since 17.15:
   address, was stopped with an error. Asynchronous calls now work as in
   WarpOS, collected with WaitFor68K(), and a missing code address returns
   PPERR_MISCERR.
+- A PPC program that called SetExcHandler() with no exception type the
+  library handles (EXCF_ALTIVECUNAV alone, for one) was stopped with an
+  error. It now gets a handle, as in WarpOS, and RemExcHandler() frees it.
 
 What has changed since 17.14:
 
