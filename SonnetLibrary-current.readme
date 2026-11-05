@@ -335,6 +335,9 @@ What has changed since 17.15:
   library took it as 256 MB, and every flush of the whole data cache then
   crashed the program that asked for it. A failed measurement now gives
   1 MB, the size the L2 is set to.
+- A PPC task that signalled a task's exception signals could hang for
+  ever if an interrupt came at the wrong moment. Its wait now ends
+  properly.
 
 What has changed since 17.14:
 

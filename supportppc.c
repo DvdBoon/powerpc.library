@@ -384,7 +384,7 @@ PPCFUNCTION VOID MergeIntMsgs(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
 
 PPCFUNCTION ULONG CheckExcSignal(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct TaskPPC* myTask, __reg("r5") ULONG signal)
 {
-	ULONG sigmask, test;
+	ULONG sigmask;
 
 	while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
 
@@ -402,7 +402,18 @@ PPCFUNCTION ULONG CheckExcSignal(__reg("r3") struct PrivatePPCBase* PowerPCBase,
 	FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
 	CauseDECInterrupt(PowerPCBase);
 
-    while (test = (volatile ULONG)PowerPCBase->pp_TaskExcept);
+    /*
+     * THE WAIT READS THE FIELD EVERY TIME -- T5 (REVIEW-LIB.md). This was
+     * "while (test = (volatile ULONG)PowerPCBase->pp_TaskExcept);": the cast
+     * made the VALUE volatile, not the access, and the compiled loop spun on a
+     * register. When CauseDECInterrupt returned before the kernel's TaskCheck
+     * had cleared the field -- a spurious external interrupt, or a trace or
+     * perfmon exit, ends its wait -- the caller spun for ever. Now it waits
+     * until TaskCheck runs, at the latest on the next scheduler tick. WarpOS
+     * and 17.13b load the field on every turn (CheckExcSignals .check,
+     * powerpc.p:3141-3144; .IntWait2, ppcfunctions.p:6237-6239): THIS MATCHES.
+     */
+    while (*((volatile ULONG*)&PowerPCBase->pp_TaskExcept));
 
 	return signal;
 
