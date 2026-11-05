@@ -345,6 +345,10 @@ What has changed since 17.15:
 - A PPC task that signalled a task's exception signals could hang for
   ever if an interrupt came at the wrong moment. Its wait now ends
   properly.
+- A PPC program that called Run68K() with PPF_ASYNC, or with no code
+  address, was stopped with an error. Asynchronous calls now work as in
+  WarpOS, collected with WaitFor68K(), and a missing code address returns
+  PPERR_MISCERR.
 
 What has changed since 17.14:
 

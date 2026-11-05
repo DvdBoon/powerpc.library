@@ -1265,7 +1265,7 @@ static const APTR LibVectors[] =
 
 
     (APTR)myRun68K,              //Table of PPC functions
-	(APTR)myWaitFor68K,
+	(APTR)myWaitFor68KLVO,       //Q1: the library call; Run68K and Run68KLowLevel use myWaitFor68K
 	(APTR)mySPrintF,
 	(APTR)myRun68KLowLevel,
 	(APTR)myAllocVecPPC,

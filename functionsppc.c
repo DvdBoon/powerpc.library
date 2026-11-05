@@ -55,13 +55,24 @@ PPCFUNCTION LONG myRun68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
     args.db_Arg[2] = PPStruct->PP_Offset;                 //Extra info
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
+    /*
+     * NO CALLER IS KILLED HERE, AND AN ASYNC CALL IS RUN -- Q1 (REVIEW-LIB.md).
+     * Both tests below were HaltError, which removed the calling task.
+     * - A NULL PP_Code returns PPERR_MISCERR, as 17.13b (ppcfunctions.p:
+     *   3675-3678). WarpOS does not test it.
+     * - PPF_ASYNC is run as WarpOS runs it (powerpc.p:16218-16251): the call
+     *   is sent and Run68K returns PPERR_SUCCESS at once; WaitFor68K collects
+     *   the reply (myWaitFor68KLVO, below). Another Run68K while one is out
+     *   returns PPERR_ASYNCERR, as WarpOS's .asyncerr. PP_Flags' other bits
+     *   are ignored, as WarpOS tests PPP_ASYNC only.
+     */
 	if (!(PPStruct->PP_Code))
 	{
-		HaltError(ERR_R68K);
+		return PPERR_MISCERR;
 	}
-	if (PPStruct->PP_Flags)
+	if (PowerPCBase->pp_ThisPPCProc->tp_Flags & TASKPPCF_ASYNC68K)
 	{
-		HaltError(ERR_ESNC);
+		return PPERR_ASYNCERR;
 	}
 
     PowerPCBase->pp_NumRun68k += 1;
@@ -115,6 +126,12 @@ PPCFUNCTION LONG myRun68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
 
 	SendMsgFramePPC(PowerPCBase, myFrame);
 
+	if (PPStruct->PP_Flags & PPF_ASYNC)
+	{
+		myTask->tp_Flags |= TASKPPCF_ASYNC68K;      //Q1: out until WaitFor68K
+		return PPERR_SUCCESS;
+	}
+
 	myWaitFor68K(PowerPCBase, PPStruct);
 
     args.db_Arg[0] = PPStruct->PP_Regs[0];
@@ -140,6 +157,7 @@ PPCFUNCTION LONG myWaitFor68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
     ULONG recvdSigs, signals;
     ULONG sigMask = SIGF_DOS;
     ULONG heldSigs = 0;     //Q2: signals no 68k mirror could take, given back when the call returns
+    struct MsgFrame* deferred = NULL;   //Q1: an async call's reply that came during another wait
 
     struct TaskPPC* myTask = PowerPCBase->pp_ThisPPCProc;
 
@@ -161,6 +179,19 @@ PPCFUNCTION LONG myWaitFor68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
                 {
                     case ID_DONE:
                     {
+                        /*
+                         * Q1: WHILE AN ASYNC Run68K IS OUT, a reply that comes
+                         * during any other wait -- Run68KLowLevel's, below --
+                         * is that call's. It is kept and put back on the port
+                         * when this wait ends, for WaitFor68K. myWaitFor68KLVO
+                         * clears the flag before it waits, so its own wait
+                         * takes the reply here as a normal call's.
+                         */
+                        if (myTask->tp_Flags & TASKPPCF_ASYNC68K)
+                        {
+                            deferred = myFrame;
+                            break;
+                        }
                         struct NewTask* myNewTask = (struct NewTask*)myTask;
                         if (!(myNewTask->nt_Task.pt_MirrorPort))
                         {
@@ -191,6 +222,10 @@ PPCFUNCTION LONG myWaitFor68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
                             while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
                             myTask->tp_Task.tc_SigRecvd |= heldSigs;
                             FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
+                        }
+                        if (deferred)       //Q1: the async call's reply, back on the port for WaitFor68K
+                        {
+                            myPutMsgPPC(PowerPCBase, myTask->tp_Msgport, (struct Message*)deferred);
                         }
                         return (LONG)value;
                     }
@@ -228,6 +263,30 @@ PPCFUNCTION LONG myWaitFor68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
         }
     }
     return 0;
+}
+
+/********************************************************************************************
+*
+*        LONG = WaitFor68K(struct Library*, struct PPCArgs*), the library call -- Q1
+*
+*        Collects an async Run68K. With none out it returns PPERR_WAITERR at once, as
+*        WarpOS's WaitFor68K (powerpc.p:16277-16315); it used to be myWaitFor68K itself,
+*        which then waited for a reply that never came. Run68K and Run68KLowLevel go on
+*        calling myWaitFor68K directly.
+*
+*********************************************************************************************/
+
+PPCFUNCTION LONG myWaitFor68KLVO(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct PPCArgs* PPStruct)
+{
+    struct TaskPPC* myTask = PowerPCBase->pp_ThisPPCProc;
+
+    if (!(myTask->tp_Flags & TASKPPCF_ASYNC68K))
+    {
+        return PPERR_WAITERR;
+    }
+    myTask->tp_Flags &= ~TASKPPCF_ASYNC68K;
+
+    return myWaitFor68K(PowerPCBase, PPStruct);
 }
 
 /********************************************************************************************

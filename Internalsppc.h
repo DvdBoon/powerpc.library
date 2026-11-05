@@ -65,11 +65,13 @@ void counter(ULONG) = "\tlwzx\tr4,r0,r3\n\taddi\tr4,r4,1\n\tstwx\tr4,r0,r3\n";
 #undef TASKPPCF_ATOMIC
 #define TASKPPCB_EMULATOR   4
 #define TASKPPCB_ATOMIC     5
+#define TASKPPCB_ASYNC68K   12      //Q1: an async Run68K is out, WaitFor68K collects it
 #define TASKPPCB_DELETED    13      //W3: DeleteTaskPPC has torn this task down
 #define TASKPPCB_CREATORPPC 14
 #define TASKPPCB_CRASHED    15
 #define TASKPPCF_EMULATOR   (1L<<4)
 #define TASKPPCF_ATOMIC     (1L<<5)
+#define TASKPPCF_ASYNC68K   (1L<<12)
 #define TASKPPCF_DELETED    (1L<<13)
 #define TASKPPCF_CREATORPPC (1L<<14)
 #define TASKPPCF_CRASHED    (1L<<15)
@@ -238,6 +240,7 @@ void mvtoBAT3(struct BATArray*)
 LONG myRun68K(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct PPCArgs* PPStruct);
 LONG myCRun68K(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct PPCArgs* PPStruct);
 LONG myWaitFor68K(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct PPCArgs* PPStruct);
+LONG myWaitFor68KLVO(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct PPCArgs* PPStruct);
 VOID mySPrintF(__r3 struct PrivatePPCBase* PowerPCBase, __r4 STRPTR Formatstring, __r5 APTR Values);
 APTR myAllocVecPPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 ULONG size, __r5 ULONG flags, __r6 ULONG align);
 LONG myFreeVecPPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 APTR memblock);
