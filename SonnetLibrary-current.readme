@@ -345,6 +345,10 @@ What has changed since 17.15:
 - A PPC program that called SetExcHandler() with no exception type the
   library handles (EXCF_ALTIVECUNAV alone, for one) was stopped with an
   error. It now gets a handle, as in WarpOS, and RemExcHandler() frees it.
+- A PPC program that called AllocPooledPPC() or FreePooledPPC() with no
+  pool was stopped with an error, and every later PPC allocation then
+  hung. Both now return at once, as in WarpOS, and AllocPooledPPC() also
+  returns NULL for a size of 0.
 
 What has changed since 17.14:
 

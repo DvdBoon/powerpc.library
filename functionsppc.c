@@ -4169,6 +4169,22 @@ PPCFUNCTION APTR myAllocPooledPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase
     APTR mem = NULL;
     struct poolHeader* myHeader = (struct poolHeader*)poolheader;
 
+    /*
+     * F5: NO POOL OR NO SIZE GETS NULL, before pp_SemMemory is taken. A NULL
+     * pool was read at once (ph_ThresholdSize, +0x10) with the semaphore
+     * held: the task was killed holding it, and every later PPC allocation
+     * waited for ever. A size of 0 returned a pointer just past its own 32
+     * bytes, the start of the next block. MATCHES WarpOS
+     * (warpos/warpos/mm/pool.c:101-102); 17.13b tests neither
+     * (ppcfunctions.p:6872-6876). AllocVecPPC passes neither (:349-351).
+     */
+    if ((!(myHeader)) || (!(size)))
+    {
+        args.db_Arg[0] = 0;
+        printDebug(PowerPCBase, (struct DebugArgs*)&args);
+        return NULL;
+    }
+
     myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemMemory);
 
     if (myHeader->ph_ThresholdSize < size)
@@ -4258,7 +4274,17 @@ PPCFUNCTION VOID myFreePooledPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase,
 
     struct poolHeader* myHeader = poolheader;
 
-    if (!(ptr))
+    /*
+     * F5: NO POOL, NOTHING DONE, before pp_SemMemory is taken: a NULL pool
+     * was read at once with the semaphore held, and the task was killed
+     * holding it. WarpOS's FreePooledPPC never reads the pool; it frees from
+     * the chunk's own header (warpos/warpos/mm/pool.c:178-246). Here the
+     * pool is needed to find the block's puddle, so the block stays in its
+     * pool until DeletePoolPPC frees it. 17.13b tests the pointer only
+     * (ppcfunctions.p:7220-7221), as this did. FreeVecPPC passes the pool
+     * it recorded (:391).
+     */
+    if ((!(ptr)) || (!(myHeader)))
     {
         return;
     }
