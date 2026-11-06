@@ -4380,7 +4380,7 @@ PPCFUNCTION APTR myRawDoFmtPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
     args.db_Arg[3] = (ULONG)putchdata;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
-    UBYTE sLength;
+    ULONG sLength;      //F3: 32 bits, as WarpOS and 17.13b count; a UBYTE printed 44 of 300 characters, and none of 256
     STRPTR stringPtr;
     struct RDFData rdfData;
 
@@ -4502,7 +4502,15 @@ PPCFUNCTION APTR myRawDoFmtPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                     sLength = ~sLength;
 
          BStrOutput:
-                    if ((!(rdfData.rd_TruncateNum)) || ((rdfData.rd_TruncateNum) && (sLength > rdfData.rd_TruncateNum)))
+                    /*
+                     * F1: THE PRECISION IS A MAXIMUM. With none, the whole
+                     * length; otherwise the smaller of the two. MATCHES WarpOS
+                     * (powerpc.p:14370-14376, "cut if neccesary") and 17.13b
+                     * (ppcfunctions.p:9676-9682). The test was inverted, from
+                     * 17.15: "%.8s" printed all of a longer string, and
+                     * "%.10s" of "abc" its end byte and the six after it.
+                     */
+                    if ((!(rdfData.rd_TruncateNum)) || (sLength <= rdfData.rd_TruncateNum))
                     {
                         rdfData.rd_TruncateNum = sLength;
                     }

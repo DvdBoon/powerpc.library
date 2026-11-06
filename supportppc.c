@@ -1252,9 +1252,19 @@ PPCFUNCTION VOID MakeHex(__reg("r3") struct RDFData* rdfData, __reg("r4") ULONG 
             iterations = 4;
             value = roll(value, 16);
         }
+        /*
+         * F2: THE VALUE ROTATES IN PLACE, a digit per turn, from the top.
+         * The loop took roll(value, 4) without keeping it, so every digit was
+         * the first one ("%lx" of 0x12345678 printed "11111111"), and roll()
+         * itself rotated by 4 whatever it was given (Internalsppc.h). MATCHES
+         * WarpOS's BinToHex, "rotlwi r21,r21,16" for a word, then
+         * "rotlwi r21,r21,4" per digit (powerpc.p:14522-14552), and 17.13b
+         * (ppcfunctions.p:9851-9885).
+         */
         for (int i = 0; i < iterations; i++)
         {
-            currNibble = roll(value, 4) & 0xf;
+            value = roll(value, 4);
+            currNibble = value & 0xf;
             if ((currNibble) || (mySwitch))
             {
                 mySwitch = -1;

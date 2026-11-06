@@ -360,6 +360,10 @@ What has changed since 17.15:
   or FreeXMsg(), was stopped with an error or corrupted memory. Each now
   hands it to the side that made it, as in WarpOS, and a PPC XMsg reaches
   a 68k port with its type, NT_XMSGPPC, as in WarpOS.
+- RawDoFmtPPC() printed every hexadecimal number wrongly, treated a
+  precision as a minimum (printing too much, or bytes past the end of a
+  string), and cut strings of 256 characters or more. All three now work
+  as in WarpOS.
 
 What has changed since 17.14:
 
