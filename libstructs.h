@@ -127,6 +127,7 @@ ULONG                   ic_env4;    /* sonnet/ReportG4asG3 << 24; 68k only */
 UWORD                   ic_gfxType;
 UWORD                   ic_gfxSubType;
 UWORD                   ic_pciType;
+UWORD                   ic_ErrShown;    /* L2: PrintCrtErr has shown its requester and run CleanUp */
 };
 
 struct InitData {

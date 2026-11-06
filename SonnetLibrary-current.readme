@@ -365,6 +365,11 @@ What has changed since 17.15:
   checking for it saw a failure, and a second call could crash the
   program. It now works as in WarpOS, and a request smaller than the
   stack succeeds without a change.
+- When the library could not start, it could close other libraries twice
+  behind two requesters, or hang the machine if the ramlib stack could not
+  be enlarged; and on e300 cards a warning closed libraries it still used.
+  Now one requester, each library closed once, the ramlib case goes on as
+  in 17.13b, and the warning closes nothing.
 
 What has changed since 17.14:
 

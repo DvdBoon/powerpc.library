@@ -167,19 +167,27 @@ static void CleanUp(struct InternalConsts *myConsts)
         FreeVec(nameSpace);
     }
 #endif
+    /*
+     * L2: EACH SLOT IS CLEARED AS IT IS CLOSED, so a second CleanUp closes
+     * nothing. A Setup* function's PrintCrtErr ran it, and LibInit's own
+     * PrintCrtErr ran it again: each library's open count dropped twice.
+     */
     if (MediatorPCIBase = myConsts->ic_PciBase)
     {
         CloseLibrary((struct Library*)MediatorPCIBase);
+        myConsts->ic_PciBase = NULL;
     }
 
     if (DOSBase = myConsts->ic_DOSBase)
     {
         CloseLibrary((struct Library*)DOSBase);
+        myConsts->ic_DOSBase = NULL;
     }
 
     if (ExpansionBase = myConsts->ic_ExpansionBase)
     {
         CloseLibrary((struct Library*)ExpansionBase);
+        myConsts->ic_ExpansionBase = NULL;
     }
 
     return;
@@ -721,8 +729,17 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
     }
 
     if (!(cardData))
-    {        
-        PrintCrtErr(myConsts, "Error setting up PPC card");
+    {
+        /*
+         * L2: ONE REQUESTER AND ONE CleanUp. SetupKiller, SetupHarrier and
+         * SetupMPC107 show their own error through PrintCrtErr before they
+         * return FALSE; this general one is for a card whose setup showed
+         * none -- an unsupported device ID, for one.
+         */
+        if (!(myConsts->ic_ErrShown))
+        {
+            PrintCrtErr(myConsts, "Error setting up PPC card");
+        }
         return NULL;
     }
 
@@ -1070,10 +1087,17 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
 
     Disable();
 
+    /*
+     * L4: A FAILED RAMLIB STACK INCREASE IS PASSED OVER, as 17.13b does --
+     * it does not read the result (powerpc.s:749-755). This showed a
+     * requester with interrupts off and returned with them still off, so
+     * the machine hung, and with the library half installed (REVIEW-LIB.md
+     * L3). ChangeStackRamLib fails only when AllocVec(0x4000) does
+     * (functions68k.s:76-81).
+     */
     if (!(ChangeStackRamLib(0x4000, SysBase)))
     {
-        PrintCrtErr(myConsts, "Failure to increase ramlib stack size");
-        return NULL;
+        D(("Could not increase the ramlib stack size; going on\n"));
     }
 
     OldLoadSeg    = SetFunction((struct Library*)DOSBase, _LVOLoadSeg,    (ULONG (*)())patchLoadSeg);
@@ -1143,7 +1167,7 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
 
     if ((myConsts->ic_pciType == VENDOR_E3B) && ((myBase->pp_DeviceID == DEVICE_MPC8343E) || (myBase->pp_DeviceID == DEVICE_MPC8314E)) && (myConsts->ic_gfxType == VENDOR_3DFX))
     {
-            PrintCrtErr(myConsts, "e300 based PPC cards currently not working correctly!");
+            PrintError(SysBase, "e300 based PPC cards currently not working correctly!");   //W7: a warning, so no CleanUp: the library goes on using pci, dos and expansion
     }
     D(("Done!\n"));
     return PowerPCBase;
@@ -2502,6 +2526,7 @@ void PrintCrtErr(struct InternalConsts* myConsts, UBYTE* crterrtext)
 {
     PrintError(myConsts->ic_SysBase, crterrtext);
     CleanUp(myConsts);
+    myConsts->ic_ErrShown = 1;      //L2: LibInit's general card error is not shown on top of this one
     return;
 }
 
