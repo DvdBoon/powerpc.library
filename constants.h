@@ -251,6 +251,7 @@
 #define MAX_PPCI_SLOTS          4
 #define PCI_OFFSET_ID           0
 #define PCI_OFFSET_COMMAND      4
+#define PCI_OFFSET_BAR1         0x14
 #define DEVICENUMBER_SHIFT      3
 #define BUSNUMBER_SHIFT         8
 #define BUSMASTER_ENABLE        (1<<2)
@@ -500,6 +501,23 @@
 #define IMMR_PCIEXP1LAWBAR      0x80
 #define IMMR_PCIEXP1LAWAR       0x84
 
+// The MPC8314E's other local access windows (MPC8315ERM, Local Access
+// block 0x0_0000), read by the debug build only.
+#define IMMR_LBLAWBAR0          0x20
+#define IMMR_LBLAWAR0           0x24
+#define IMMR_LBLAWBAR1          0x28
+#define IMMR_LBLAWAR1           0x2C
+#define IMMR_LBLAWBAR2          0x30
+#define IMMR_LBLAWAR2           0x34
+#define IMMR_LBLAWBAR3          0x38
+#define IMMR_LBLAWAR3           0x3C
+#define IMMR_PCIEXP2LAWBAR      0x88
+#define IMMR_PCIEXP2LAWAR       0x8C
+#define IMMR_DDRLAWBAR0         0xA0
+#define IMMR_DDRLAWAR0          0xA4
+#define IMMR_DDRLAWBAR1         0xA8
+#define IMMR_DDRLAWAR1          0xAC
+
 #define IMMR_SWCRR              0x204
 #define IMMR_SWCNR              0x208
 #define IMMR_SWSRR              0x20E
@@ -509,7 +527,9 @@
 #define IMMR_SEMSR              0x738
 
 #define IMMR_RCWLR              0x900
+#define IMMR_RCWHR              0x904
 #define IMMR_RSR                0x910
+#define IMMR_RMR                0x914
 #define IMMR_RPR                0x918
 #define IMMR_RCR                0x91C
 #define IMMR_RCER               0x920
@@ -557,6 +577,18 @@
 #define IMMR_PEX_OWTARL0        0x9CA8
 #define IMMR_PEX_OWTARH0        0x9CAC
 #define IMMR_PEX_EPIWTAR1       0x9DE4
+// Read by the debug build only (MPC8315ERM Table 14-2: the controller's own
+// configuration header at +0x000, BAR configuration at +0x4B0-0x4E0, CSB
+// bridge control at +0x808, EP inbound translation at +0xDE0).
+#define IMMR_PEX_CFG_CMD        0x9004
+#define IMMR_PEX_CFG_BAR0       0x9010
+#define IMMR_PEX_CFG_BAR1       0x9014
+#define IMMR_PEX_CFG_READY      0x94B0
+#define IMMR_PEX_BAR_ENABLE     0x94D4
+#define IMMR_PEX_CSB_CTRL       0x9808
+#define IMMR_PEX_EPIWTAR0       0x9DE0
+#define IMMR_PEX_EPIWTAR2       0x9DE8
+#define IMMR_PEX_EPIWTAR3       0x9DEC
 #define IMMR_PEX_RCIWAR0        0x9E60
 #define IMMR_PEX_RCIWTAR0       0x9E64
 #define IMMR_PEX_RCIBARL0       0x9E68

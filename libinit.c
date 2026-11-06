@@ -55,6 +55,104 @@ APTR OldLoadSeg, OldNewLoadSeg, OldAllocMem, OldAddTask, OldRemTask;
 struct PPCBase* myPPCBase;
 struct ExecBase* mySysBase;
 
+#ifdef DEBUG
+/*
+ * THE DEBUG BUILD (build.ps1 -DebugInit, 6 Nov 2026): the PCIe board's IMMR
+ * and RAM windows as SetupPKiller found them. Kept on the 68k side, because
+ * the copy in the board's InitData can be gone by the time-out.
+ */
+ULONG dbgPexConfig, dbgPexMem;
+
+/*
+ * DEBUG-INIT 2: a time stamp in 1/50 s since midnight, from DateStamp, while
+ * dos.library is open (CleanUp closes it). The start-up runs as a process
+ * (getENVs calls GetVar), so DateStamp and Delay are allowed here.
+ */
+ULONG dbgTicks(struct InternalConsts* myConsts)
+{
+    struct DosLibrary* DOSBase = myConsts->ic_DOSBase;
+    struct DateStamp ds;
+
+    if (!(DOSBase))
+    {
+        return 0;
+    }
+
+    DateStamp(&ds);
+
+    return (((ULONG)ds.ds_Minute * 60 * TICKS_PER_SECOND) + (ULONG)ds.ds_Tick);
+}
+
+/*
+ * DEBUG-INIT 2: the PCIe card's address windows. The local access windows
+ * are big-endian system registers, printed as read; the PCIe controller's
+ * registers are little-endian, so they are swapped for printing (MPC8315ERM
+ * 14.4.1 and 14.5). PEX_BAR_SIZEL is the mask of the BAR that PEX_BAR_SEL
+ * selects.
+ */
+void dbgPexWindows(ULONG configBase, STRPTR when)
+{
+    D(("%s: LBLAW0 %08lx %08lx LBLAW1 %08lx %08lx LBLAW2 %08lx %08lx LBLAW3 %08lx %08lx\n", when,
+       readmemL(configBase, IMMR_LBLAWBAR0), readmemL(configBase, IMMR_LBLAWAR0),
+       readmemL(configBase, IMMR_LBLAWBAR1), readmemL(configBase, IMMR_LBLAWAR1),
+       readmemL(configBase, IMMR_LBLAWBAR2), readmemL(configBase, IMMR_LBLAWAR2),
+       readmemL(configBase, IMMR_LBLAWBAR3), readmemL(configBase, IMMR_LBLAWAR3)));
+    D(("%s: PCILAW0 %08lx %08lx PCILAW1 %08lx %08lx PEX1LAW %08lx %08lx PEX2LAW %08lx %08lx\n", when,
+       readmemL(configBase, IMMR_PCILAWBAR0), readmemL(configBase, IMMR_PCILAWAR0),
+       readmemL(configBase, IMMR_PCILAWBAR1), readmemL(configBase, IMMR_PCILAWAR1),
+       readmemL(configBase, IMMR_PCIEXP1LAWBAR), readmemL(configBase, IMMR_PCIEXP1LAWAR),
+       readmemL(configBase, IMMR_PCIEXP2LAWBAR), readmemL(configBase, IMMR_PCIEXP2LAWAR)));
+    D(("%s: DDRLAW0 %08lx %08lx DDRLAW1 %08lx %08lx\n", when,
+       readmemL(configBase, IMMR_DDRLAWBAR0), readmemL(configBase, IMMR_DDRLAWAR0),
+       readmemL(configBase, IMMR_DDRLAWBAR1), readmemL(configBase, IMMR_DDRLAWAR1)));
+    D(("%s: PEX cmd/status %08lx BAR0 %08lx BAR1 %08lx CFG_READY %08lx BAR_ENABLE %08lx CSB_CTRL %08lx\n", when,
+       swap32(readmemL(configBase, IMMR_PEX_CFG_CMD)), swap32(readmemL(configBase, IMMR_PEX_CFG_BAR0)),
+       swap32(readmemL(configBase, IMMR_PEX_CFG_BAR1)), swap32(readmemL(configBase, IMMR_PEX_CFG_READY)),
+       swap32(readmemL(configBase, IMMR_PEX_BAR_ENABLE)), swap32(readmemL(configBase, IMMR_PEX_CSB_CTRL))));
+    D(("%s: PEX BAR_SEL %08lx BAR_SIZEL %08lx EPIWTAR0-3 %08lx %08lx %08lx %08lx\n", when,
+       swap32(readmemL(configBase, IMMR_PEX_BAR_SEL)), swap32(readmemL(configBase, IMMR_PEX_BAR_SIZEL)),
+       swap32(readmemL(configBase, IMMR_PEX_EPIWTAR0)), swap32(readmemL(configBase, IMMR_PEX_EPIWTAR1)),
+       swap32(readmemL(configBase, IMMR_PEX_EPIWTAR2)), swap32(readmemL(configBase, IMMR_PEX_EPIWTAR3))));
+    return;
+}
+
+/*
+ * DEBUG-INIT 2: after PrintCrtErr's CleanUp has closed prometheus.library
+ * and dos.library, six more readings a second apart (dos.library opened
+ * once more for Delay).
+ */
+void dbgAfterCleanUp(void)
+{
+    struct ExecBase* SysBase = mySysBase;
+    struct DosLibrary* DOSBase;
+    ULONG dbgStep;
+
+    if (!(dbgPexConfig))
+    {
+        return;
+    }
+
+    if (!(DOSBase = (struct DosLibrary*)OpenLibrary("dos.library", 37L)))
+    {
+        return;
+    }
+
+    for (dbgStep = 0; dbgStep < 6; dbgStep++)
+    {
+        D(("After CleanUp %ld: [%08lx] IMMRBAR %08lx [%08lx] RSR %08lx; 0xf0 %08lx 0x900 %08lx 0x100000 %08lx 0x100004 %08lx\n",
+           dbgStep, dbgPexConfig + IMMR_IMMRBAR, readmemL(dbgPexConfig, IMMR_IMMRBAR),
+           dbgPexConfig + IMMR_RSR, readmemL(dbgPexConfig, IMMR_RSR),
+           readmemL(dbgPexMem, 0xf0), readmemL(dbgPexMem, VEC_DECREMENTER),
+           readmemL(dbgPexMem, 0x100000), readmemL(dbgPexMem, 0x100004)));
+
+        Delay(TICKS_PER_SECOND);
+    }
+
+    CloseLibrary((struct Library*)DOSBase);
+    return;
+}
+#endif
+
 /********************************************************************************************
 *
 *	Standard dummy entry of a device/library
@@ -745,9 +843,34 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
 
     D(("Waiting on PPC card to respond\n"));
 
+#ifdef DEBUG
+    /*
+     * THE DEBUG BUILD: every change of the status word during the wait, the
+     * first 16 with their read count. The time-out message alone shows only
+     * the last value read: a STATUS_INIT that was later cleared also ends as
+     * "not responding".
+     */
+    ULONG dbgLast    = cardData->id_Status;
+    ULONG dbgChanges = 0;
+
+    D(("Status %08lx when the wait starts, t=%ld\n", dbgLast, dbgTicks(myConsts)));
+#endif
+
     for (i=0; i<0xEC0000; i++)
     {
         status = cardData->id_Status;
+
+#ifdef DEBUG
+        if (status != dbgLast)
+        {
+            if (dbgChanges < 16)
+            {
+                D(("Status %08lx after %ld reads, t=%ld\n", status, i, dbgTicks(myConsts)));
+            }
+            dbgChanges++;
+            dbgLast = status;
+        }
+#endif
 
         switch (status)
         {
@@ -784,12 +907,93 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
 
     if (i == 0xEC0000)
     {
+#ifdef DEBUG
+        D(("Timed out after %ld reads, t=%ld: last status %08lx, %ld changes\n", i, dbgTicks(myConsts), status, dbgChanges));
+
+        if (deviceID == DEVICE_MPC8314E)
+        {
+            /*
+             * THE DEBUG BUILD: the board after the wait. RAM 0xf0 keeps the
+             * library's RSTE test word until the PPC setup code clears
+             * 0x0-0xff (setupppc.c:947-951): RSTE with the jump still at
+             * 0x900 means the jump never ran; all zero, that the board's
+             * RAM was cleared; all ones, that the board no longer answers.
+             * Then the status word once more after CINVL: a value other
+             * than the plain read means the 68k data cache answered the
+             * wait loop.
+             */
+            D(("PCIe board at the time-out: IMMRBAR %08lx RSR %08lx RMR %08lx SWCRR %08lx SWCNR %08lx\n",
+               readmemL(dbgPexConfig, IMMR_IMMRBAR), readmemL(dbgPexConfig, IMMR_RSR),
+               readmemL(dbgPexConfig, IMMR_RMR), readmemL(dbgPexConfig, IMMR_SWCRR),
+               readmemL(dbgPexConfig, IMMR_SWCNR)));
+            D(("PCIe board RAM at the time-out: 0xf0 %08lx 0x8f4 %08lx 0x900 %08lx 0x100000 %08lx 0x100004 %08lx\n",
+               readmemL(dbgPexMem, 0xf0), readmemL(dbgPexMem, VEC_DECREMENTER - 12),
+               readmemL(dbgPexMem, VEC_DECREMENTER), readmemL(dbgPexMem, 0x100000),
+               readmemL(dbgPexMem, 0x100004)));
+
+            APTR  dbgStack = SuperState();
+            cinv(dbgPexMem + 0x100004);
+            ULONG dbgWord  = readmemL(dbgPexMem, 0x100004);
+            UserState(dbgStack);
+
+            D(("Status word at 0x100004 after CINVL: %08lx\n", dbgWord));
+
+            dbgPexWindows(dbgPexConfig, "PCIe windows at the time-out");
+
+            /*
+             * DEBUG-INIT 2: 60 more seconds, a reading every half second,
+             * printed when a value changes, every 10 seconds, and at the
+             * end: the card's register base and reset status through BAR0,
+             * and the library's words in its RAM through BAR1. Memory reads
+             * only: a config read to a card that is resetting can be
+             * retried for ever.
+             */
+            {
+                ULONG dbgPrev[6] = { 0, 0, 0, 0, 0, 0 };
+                ULONG dbgNow[6];
+                ULONG dbgStep, dbgK, dbgDiff;
+
+                for (dbgStep = 0; dbgStep < 120; dbgStep++)
+                {
+                    Delay(TICKS_PER_SECOND / 2);
+
+                    dbgNow[0] = readmemL(dbgPexConfig, IMMR_IMMRBAR);
+                    dbgNow[1] = readmemL(dbgPexConfig, IMMR_RSR);
+                    dbgNow[2] = readmemL(dbgPexMem, 0xf0);
+                    dbgNow[3] = readmemL(dbgPexMem, VEC_DECREMENTER);
+                    dbgNow[4] = readmemL(dbgPexMem, 0x100000);
+                    dbgNow[5] = readmemL(dbgPexMem, 0x100004);
+
+                    dbgDiff = 0;
+                    for (dbgK = 0; dbgK < 6; dbgK++)
+                    {
+                        if (dbgNow[dbgK] != dbgPrev[dbgK])
+                        {
+                            dbgDiff = 1;
+                        }
+                        dbgPrev[dbgK] = dbgNow[dbgK];
+                    }
+
+                    if ((dbgDiff) || (!(dbgStep % 20)) || (dbgStep == 119))
+                    {
+                        D(("Watch %ld, t=%ld: [%08lx] IMMRBAR %08lx [%08lx] RSR %08lx; 0xf0 %08lx 0x900 %08lx 0x100000 %08lx 0x100004 %08lx\n",
+                           dbgStep, dbgTicks(myConsts),
+                           dbgPexConfig + IMMR_IMMRBAR, dbgNow[0], dbgPexConfig + IMMR_RSR, dbgNow[1],
+                           dbgNow[2], dbgNow[3], dbgNow[4], dbgNow[5]));
+                    }
+                }
+            }
+        }
+#endif
         switch (status)
         {
             case STATUS_INIT:
             case ERR_PPCOK:
             {
                 PrintCrtErr(myConsts, "PowerPC CPU possibly crashed during setup");
+#ifdef DEBUG
+                dbgAfterCleanUp();
+#endif
                 return NULL;
             }
 #if 0
@@ -802,6 +1006,9 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
             default:
             {
                 PrintCrtErr(myConsts, "PowerPC CPU not responding");
+#ifdef DEBUG
+                dbgAfterCleanUp();
+#endif
                 return NULL;
             }
         }
@@ -839,7 +1046,18 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
 
     D(("Accessible PPC memory set up with header at %08lx\n", myPPCMemHeader));
 
-    if ((deviceID == DEVICE_MPC8343E) || (deviceID == DEVICE_MPC8314E))
+    /*
+     * THE 831X (PCIe M1) RESERVES ITS PAGE TABLE FROM THE 68k POOL. Its table
+     * is at the top of RAM (setupppc.c), so the pool's upper bound must sit
+     * below it (mh_Upper = top - ptSize), the else branch -- otherwise
+     * AllocVec(MEMF_REVERSE) hands out PowerPCBase inside the table (it did:
+     * PA 0x7FF61F0 in the 0x7E00000 table) and the first NewListPPC write
+     * corrupts a PTE, hanging the PPC in its exception handler. MATCHES 17.13b
+     * (powerpc.s:604-605, MH_UPPER = memlen - PageTableSize) and the
+     * Harrier/MPC107 branch. The 834X (K1) keeps the full top: its table
+     * stays low.
+     */
+    if (deviceID == DEVICE_MPC8343E)
     {
         myPPCMemHeader->mh_Upper = (APTR)((ULONG)myZeroPage + (cardData->id_MemSize));
         bytesFree = (cardData->id_MemSize - MEM_GAP - sizeof(struct MemHeader));
@@ -1691,6 +1909,38 @@ struct InitData* SetupPKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
 
     D(("Setting up PPC card config base at %08lx\n",configBase));
 
+#ifdef DEBUG
+    /*
+     * THE DEBUG BUILD: the board's registers as its firmware left them.
+     * IMMRBAR is where the firmware put the IMMR (the PPC side expects
+     * IMMR_ADDR_DEFAULT); RCWHR holds the reset-time boot vector and
+     * watchdog bits; RSR the cause of the last reset; RMR whether a
+     * checkstop resets the board; SWCRR and SWCNR the watchdog now. Offsets
+     * and fields from the MPC8314E's own manual, MPC8315ERM (Table 4-28,
+     * Figure 4-4, Table 5-38).
+     */
+    dbgPexConfig = configBase;
+    dbgPexMem    = ppcmemBase;
+
+    D(("PCIe board before set-up: IMMRBAR %08lx RCWLR %08lx RCWHR %08lx RSR %08lx RMR %08lx\n",
+       readmemL(configBase, IMMR_IMMRBAR), readmemL(configBase, IMMR_RCWLR),
+       readmemL(configBase, IMMR_RCWHR), readmemL(configBase, IMMR_RSR),
+       readmemL(configBase, IMMR_RMR)));
+    D(("PCIe board watchdog before set-up: SWCRR %08lx SWCNR %08lx\n",
+       readmemL(configBase, IMMR_SWCRR), readmemL(configBase, IMMR_SWCNR)));
+
+    /*
+     * DEBUG-INIT 2: BAR1 and command/status as the host's config space has
+     * them (as prometheus.library returns them), then the card's address
+     * windows before the library writes its own.
+     */
+    D(("PCIe board config space from the host: BAR1 %08lx command/status %08lx\n",
+       ReadConfigLong(myConsts, (ULONG)pppcdevice, PCI_OFFSET_BAR1),
+       ReadConfigLong(myConsts, (ULONG)pppcdevice, PCI_OFFSET_COMMAND)));
+
+    dbgPexWindows(configBase, "PCIe windows before set-up");
+#endif
+
     writememL(configBase, IMMR_PEX_EPIWTAR1, (swap32(0 | PEX_EPIWTAR_EN)));
     writememL(configBase, IMMR_PEX_BAR_SEL, (swap32(PEX_BAR_SEL_1)));
     writememL(configBase, IMMR_PEX_BAR_SIZEL, (swap32(PEX_BAR_SIZEL_128MB)));
@@ -1704,6 +1954,68 @@ struct InitData* SetupPKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
     writememL(configBase, IMMR_PEX_OWBAR0, (swap32(startAddress)));
     writememL(configBase, IMMR_PEX_OWTARL0, (swap32(vgamemBase)));
     writememL(configBase, IMMR_PEX_OWTARH0, 0); //high address for 64 bit addressing. Unused here
+
+#ifdef DEBUG
+    dbgPexWindows(configBase, "PCIe windows after set-up");
+
+    /*
+     * THE DEBUG BUILD: the board's RAM before the library writes any of it,
+     * through the inbound window just set. Code at 0x100 (system reset) and
+     * 0x900 (decrementer) means the firmware runs with its exception
+     * vectors in RAM at 0, which the jump written at VEC_DECREMENTER needs.
+     */
+    D(("PCIe board RAM before set-up: 0x0 %08lx 0x100 %08lx 0x104 %08lx 0x900 %08lx 0x904 %08lx\n",
+       readmemL(ppcmemBase, 0), readmemL(ppcmemBase, VEC_SYSTEMRESET),
+       readmemL(ppcmemBase, VEC_SYSTEMRESET + 4), readmemL(ppcmemBase, VEC_DECREMENTER),
+       readmemL(ppcmemBase, VEC_DECREMENTER + 4)));
+    D(("PCIe board RAM before set-up: 0xf0 %08lx 0x100000 %08lx 0x100004 %08lx\n",
+       readmemL(ppcmemBase, 0xf0), readmemL(ppcmemBase, 0x100000),
+       readmemL(ppcmemBase, 0x100004)));
+
+    /*
+     * DEBUG-INIT 2: is the card's own software changing its RAM? One long
+     * every 4 KB over the 128 MB, in 128 groups of 1 MB, summed twice half a
+     * second apart. The library has written none of it yet.
+     */
+    {
+        struct DosLibrary* DOSBase = myConsts->ic_DOSBase;
+        ULONG dbgSum[128];
+        ULONG dbgGroup, dbgN, dbgVal;
+        ULONG dbgChanged = 0, dbgFirst = 0xffffffff;
+
+        for (dbgGroup = 0; dbgGroup < 128; dbgGroup++)
+        {
+            dbgVal = 0;
+            for (dbgN = 0; dbgN < 256; dbgN++)
+            {
+                dbgVal = ((dbgVal << 1) | (dbgVal >> 31)) ^ readmemL(ppcmemBase, ((dbgGroup << 8) + dbgN) << 12);
+            }
+            dbgSum[dbgGroup] = dbgVal;
+        }
+
+        Delay(TICKS_PER_SECOND / 2);
+
+        for (dbgGroup = 0; dbgGroup < 128; dbgGroup++)
+        {
+            dbgVal = 0;
+            for (dbgN = 0; dbgN < 256; dbgN++)
+            {
+                dbgVal = ((dbgVal << 1) | (dbgVal >> 31)) ^ readmemL(ppcmemBase, ((dbgGroup << 8) + dbgN) << 12);
+            }
+            if (dbgVal != dbgSum[dbgGroup])
+            {
+                if (!(dbgChanged))
+                {
+                    dbgFirst = dbgGroup << 20;
+                }
+                dbgChanged++;
+            }
+        }
+
+        D(("Card RAM, one long per 4 KB over 128 MB: %ld of 128 1 MB groups changed in half a second (first at %08lx), t=%ld\n",
+           dbgChanged, dbgFirst, dbgTicks(myConsts)));
+    }
+#endif
 
     writememL(ppcmemBase, 0xf0, 0);
     writememL(ppcmemBase, 0xf0, KILLER_RESET);
@@ -1759,6 +2071,55 @@ struct InitData* SetupPKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
     D(("passed\n"));
 
     writememL(ppcmemBase, VEC_DECREMENTER, OPCODE_BBRANCH - 12);
+
+    /*
+     * THE PCIe M1 ENTRY (proven 6 Nov 2026). The card runs its own Linux from
+     * flash, and the e300 instruction cache is not snooped, so the patched
+     * decrementer vector at 0x900 is never re-fetched -- the core keeps
+     * running Linux's cached handler and the jump there never fires. So also
+     * patch the external-interrupt vector 0x500 to the same stub at 0x8f4
+     * (-> 0x100000) and raise the PCIe inbound mailbox (the library's own
+     * run-time signal, support68k.c; these PEX registers are little-endian,
+     * hence swap32), so the core takes an external interrupt into the setup
+     * code. NO WarpOS counterpart (warp.p:3455-3459 switches no MMU); 17.13b
+     * has no MPC8314E path.
+     */
+    writememL(ppcmemBase, VEC_EXTERNAL, OPCODE_FBRANCH + (VEC_DECREMENTER - 12) - VEC_EXTERNAL);
+    writememL(configBase, IMMR_PEX_CSMIER, swap32(PEX_CSMIER_IMBIE));
+    writememL(configBase, IMMR_PEX_IMBDR, KILLER_RESET);
+    writememL(configBase, IMMR_PEX_IMBCR, swap32(PEX_IMBCR_READY));
+
+#ifdef DEBUG
+    D(("Setup code: %08lx bytes copied to %08lx\n", segSize, (ULONG)killerData));
+    D(("Jump written: 0x8f4 %08lx %08lx %08lx 0x900 %08lx; 0x100000 %08lx %08lx\n",
+       readmemL(ppcmemBase, VEC_DECREMENTER - 12), readmemL(ppcmemBase, VEC_DECREMENTER - 8),
+       readmemL(ppcmemBase, VEC_DECREMENTER - 4), readmemL(ppcmemBase, VEC_DECREMENTER),
+       readmemL(ppcmemBase, 0x100000), readmemL(ppcmemBase, 0x100004)));
+    D(("Entered setup through 0x500 and poked the mailbox, t=%ld\n", dbgTicks(myConsts)));
+
+    {
+        struct DosLibrary* DOSBase = myConsts->ic_DOSBase;
+        ULONG dbgProbe, dbgStatus, dbgLast = 0xabcdabcd;
+
+        for (dbgProbe = 0; dbgProbe < 200; dbgProbe++)
+        {
+            dbgStatus = readmemL(ppcmemBase, 0x100004);
+
+            if (dbgStatus != dbgLast)
+            {
+                D(("Status -> %08lx, probe %ld, t=%ld\n", dbgStatus, dbgProbe, dbgTicks(myConsts)));
+                dbgLast = dbgStatus;
+
+                if (dbgStatus == ERR_PPCOK)
+                {
+                    break;
+                }
+            }
+
+            Delay(1);
+        }
+    }
+#endif
 
     return killerData;
 

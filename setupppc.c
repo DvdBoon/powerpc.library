@@ -111,7 +111,18 @@ PPCSETUP void setupPT(void)
 
     ULONG myPVR = getPVR();
 
-    if (((myPVR >> 16) == ID_MPC834X) || ((myPVR >> 16) == ID_MPC831X))
+    /*
+     * THE 831X (PCIe M1) PAGE TABLE GOES AT THE TOP OF RAM (memSize - ptSize),
+     * as 17.13b does for the Killer (setupppc.p .SetupPT: card_mem_size -
+     * pt_size) and as the Harrier/MPC107 branch below does. The 831X declares
+     * 128 MB RAM + 128 MB gfx, so ptSize is 2 MB and the old
+     * OFFSET_MESSAGES - ptSize collapsed to 0, wiping the setup code at
+     * 0x100000 -- the card came up once the table moved to the top (6 Nov
+     * 2026). libinit.c reserves this table from the 68k pool to match. The
+     * 834X (K1, 64 MB) keeps OFFSET_MESSAGES - ptSize: its table stays low and
+     * the shipping K1 path is unchanged.
+     */
+    if ((myPVR >> 16) == ID_MPC834X)
     {
         ptLoc      = OFFSET_MESSAGES - ptSize;
     }
@@ -852,6 +863,16 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
 *
 *********************************************************************************************/
 
+#ifdef PCIE_PT_TOP
+/* DEBUG-INIT 7: a progress code to zp_Status (the zero-page status at 0x0C,
+ * the one the host reads -- NOT id_Status), flushed so the host read is
+ * current. The last code before a hang is the stage setupPPC died in. Debug
+ * build only; no WarpOS counterpart (warp.p:3455-3459). */
+#define DBGMARK(n) do { myZP->zp_Status = 0x50430000u | (n); dFlush((ULONG)&myZP->zp_Status); sync(); } while (0)
+#else
+#define DBGMARK(n) do { } while (0)
+#endif
+
 PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
 {
     ULONG mem = 0;
@@ -1002,6 +1023,8 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     }
     struct PrivatePPCBase* PowerPCBase = (struct PrivatePPCBase*)myZP->zp_PowerPCBase;
 
+    DBGMARK(1);
+
     NewListPPC((struct List*)&PowerPCBase->pp_WaitingTasks);
     NewListPPC((struct List*)&PowerPCBase->pp_AllTasks);
     NewListPPC((struct List*)&PowerPCBase->pp_Snoop);
@@ -1038,6 +1061,8 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     initSema(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemSnoopList);
     initSema(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemMemory);
 
+    DBGMARK(2);
+
     PowerPCBase->pp_PPCMemSize = initData->id_MemSize;
     PowerPCBase->pp_IdUsrTasks = 100;
     PowerPCBase->pp_BusyCounter = 24;
@@ -1054,6 +1079,8 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
 
     ULONG quantum = QUANTUM_100;
     ULONG busclock = BUSCLOCK_100;
+
+    DBGMARK(3);
 
     switch (PowerPCBase->pp_DeviceID)
     {
@@ -1156,6 +1183,8 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     PowerPCBase->pp_StdQuantum = quantum;
     PowerPCBase->pp_BusClock = busclock;
 
+    DBGMARK(4);
+
     /*
      * pp_ExceptionBATs: the set a WarpOS SetExcMMU would load (WarpOS loads
      * PPC_BAT, powerpc.p:8116-8148). The same live BATs as pp_SystemBATs
@@ -1178,6 +1207,8 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
         PowerPCBase->pp_SystemSegs[i] = getSRIn(i<<28);
     }
 
+    DBGMARK(5);
+
     /*
      * THE SAME SET AGAIN, AT PHYSICAL 0x2000, for the exception entry in
      * kernel.s. PowerPCBase is a 68k-view address and the entry runs
@@ -1197,7 +1228,27 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
             libSegs[i] = PowerPCBase->pp_SystemSegs[i];
         }
         *((ULONG*)MMU_ZERO_LIB_SDR1) = getSDR1();
+#ifdef PCIE_PT_TOP
+        /*
+         * DEBUG-INIT 6: push the save area to RAM. _ExcCommon reads the
+         * library BATs/segs/SDR1 from here with translation OFF (kernel.s),
+         * and BAT0 is copyback (setupppc.c:330), so without this the writes
+         * sit in the d-cache while physical RAM keeps whatever was there -- on
+         * the PCIe M1 that is the card's resident firmware code, which the
+         * untranslated read then loads as BAT0 and faults on (the 0x32C4 ISI).
+         * NO WarpOS counterpart (its exception path switches no MMU,
+         * warp.p:3455-3459); 17.13b has no MPC8314E path. Harmless on a card
+         * with no resident code (the K1 resets into a bare card).
+         */
+        for (ULONG a = MMU_ZERO_LIB_BATS; a <= MMU_ZERO_LIB_SDR1; a += CACHELINE_SIZE)
+        {
+            dFlush(a);
+        }
+        sync();
+#endif
     }
+
+    DBGMARK(6);
 
     ULONG* cmem = (APTR)(PowerPCBase->pp_PPCMemBase + MEM_GAP - 0xC000);
     for (int i = 0; i < 0x1000; i++)
@@ -1206,6 +1257,8 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     }
 
     setupCaches(PowerPCBase, initData);
+
+    DBGMARK(7);
 
     /*
      * SPRG0 GETS THE MEANING IT HAS UNDER REAL WarpOS: a pointer, set once at

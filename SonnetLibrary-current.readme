@@ -370,6 +370,10 @@ What has changed since 17.15:
   be enlarged; and on e300 cards a warning closed libraries it still used.
   Now one requester, each library closed once, the ramlib case goes on as
   in 17.13b, and the warning closes nothing.
+- The PCIe version of the M1 card (MPC8314E) did not start at all. It now
+  starts and runs PPC programs: it is entered through its external-interrupt
+  vector, and its MMU page table is placed at the top of the card's memory
+  and kept out of the memory pool.
 
 What has changed since 17.14:
 
