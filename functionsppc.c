@@ -2639,26 +2639,40 @@ PPCFUNCTION VOID myClearExcMMU(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 *
 *********************************************************************************************/
 
-PPCFUNCTION BOOL myChangeStack(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") ULONG NewStackSize)
+PPCFUNCTION LONG myChangeStack(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") ULONG NewStackSize)
 {
     struct DebugArgs args;
     args.db_Function = 28 | (1<<8) | (1<<16);
     args.db_Arg[0] = (ULONG)NewStackSize;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
-    BOOL result;
+    /*
+     * E4: CHSTACK_SUCCESS (-1) OR CHSTACK_NOMEM (0), as WarpOS
+     * (powerpc.p:11888, :11894) and 17.13b (ppcfunctions.p:5530, :5538); it
+     * returned TRUE, 1, so a program testing for CHSTACK_SUCCESS saw its
+     * first call fail. The stack's bounds are the whole new block, and a
+     * failed MemList frees the new stack -- see below.
+     */
+    LONG result;
     APTR newStack;
     ULONG src, dst, siz, sup;
     struct MemList* stackMem;
 
     if (NewStackSize < PowerPCBase->pp_ThisPPCProc->tp_StackSize)
     {
-        return FALSE;
+        /*
+         * E4, the user's option B: the stack is big enough already, so
+         * nothing changes and the call succeeds. WarpOS returns its task
+         * pointer here, non-zero but not -1 (powerpc.p:11840); 17.13b
+         * returns 0 (ppcfunctions.p:5469), as this did, which told such a
+         * program that the call had failed.
+         */
+        return CHSTACK_SUCCESS;
     }
 
     if (!(newStack = AllocVec68K(PowerPCBase, NewStackSize, MEMF_PUBLIC|MEMF_CLEAR|MEMF_PPC)))
     {
-        return FALSE;
+        return CHSTACK_NOMEM;
     }
 
     if (stackMem = AllocVec68K(PowerPCBase, sizeof(struct MemList), MEMF_PUBLIC|MEMF_CLEAR|MEMF_PPC))
@@ -2677,18 +2691,18 @@ PPCFUNCTION BOOL myChangeStack(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
 
         myCopyMemPPC(PowerPCBase, (APTR)src, (APTR)dst, siz);
 
-        myTask->tp_Task.tc_SPLower = (APTR)dst;
+        myTask->tp_Task.tc_SPLower = newStack;      //E4: the block's start, as WarpOS (powerpc.p:11872) and 17.13b (ppcfunctions.p:5514); the copy's start made a second call copy only the old size
         myTask->tp_Task.tc_SPUpper = (APTR)((ULONG)newStack + NewStackSize);
         myTask->tp_StackSize = NewStackSize;
 
         SwapStack(sup, ((ULONG)newStack + NewStackSize));
 
-        result = TRUE;
+        result = CHSTACK_SUCCESS;
     }
     else
     {
-        FreeVec68K(PowerPCBase, stackMem);
-        result = FALSE;
+        FreeVec68K(PowerPCBase, newStack);          //E4: the new stack, as WarpOS's .free0 (powerpc.p:11890); stackMem is NULL here
+        result = CHSTACK_NOMEM;
     }
 
     args.db_Arg[0] = result;

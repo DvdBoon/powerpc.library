@@ -368,6 +368,10 @@ What has changed since 17.15:
   left an empty puddle behind on every try, and FreePooledPPC() did not
   always join the freed memory to the free space below it. Such a request
   now gets its own block, and freed memory joins up as in 17.13b.
+- ChangeStack() returned 1 instead of CHSTACK_SUCCESS, so a program
+  checking for it saw a failure, and a second call could crash the
+  program. It now works as in WarpOS, and a request smaller than the
+  stack succeeds without a change.
 
 What has changed since 17.14:
 

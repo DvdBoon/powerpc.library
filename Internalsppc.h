@@ -349,7 +349,7 @@ BOOL myIsExceptionMode(__r3 struct PrivatePPCBase* PowerPCBase);
 VOID myAllocPrivateMem(void);
 VOID myFreePrivateMem(void);
 VOID myResetPPC(void);
-BOOL myChangeStack(__r3 struct PrivatePPCBase* PowerPCBase, __r4 ULONG NewStackSize);
+LONG myChangeStack(__r3 struct PrivatePPCBase* PowerPCBase, __r4 ULONG NewStackSize);     //E4: CHSTACK_SUCCESS/CHSTACK_NOMEM, as WarpOS's r3 status
 ULONG myRun68KLowLevel(__r3 struct PrivatePPCBase* PowerPCBase, __r4 ULONG Code, __r5 LONG Offset, __r6 ULONG a0, __r7 ULONG a1, __r8 ULONG d0, __r9 ULONG d1);
 VOID printDebug(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct DebugArgs* args);
 APTR AllocVec68K(__r3 struct PrivatePPCBase* PowerPCBase, __r4 ULONG size, __r5 ULONG flags);
