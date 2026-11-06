@@ -3341,6 +3341,13 @@ PPCFUNCTION struct Message* myAllocXMsgPPC(__reg("r3") struct PrivatePPCBase* Po
 	{
 		myXMessage->mn_ReplyPort = (struct MsgPort*)port;
 		myXMessage->mn_Length = length;
+		/*
+		 * F6: THE 68k READS THIS BLOCK'S HEADER. myFreeXMsg (functions68k.c)
+		 * tells a PPC XMsg by the MAGIC_COOKIE myAllocVecPPC put at msg-16,
+		 * so that line goes to memory now, as PutXMsgPPC sends the body
+		 * (below). Nothing writes the header again until the block is freed.
+		 */
+		mySetCache(PowerPCBase, CACHE_DCACHEFLUSH, (APTR)((ULONG)myXMessage - 16), 16);
 	}
 
     args.db_Arg[0] = (ULONG)myXMessage;
@@ -3362,7 +3369,28 @@ PPCFUNCTION VOID myFreeXMsgPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
     args.db_Arg[0] = (ULONG)message;
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
-    myFreeVecPPC(PowerPCBase, message);
+    /*
+     * F6: EACH SIDE'S XMsg IS FREED ITS OWN WAY. A PPC XMsg is an AllocVecPPC
+     * block, with MAGIC_COOKIE at msg-16 (myAllocVecPPC); a 68k one is
+     * AllocXMsg's AllocVec32 block, with the 68k pointer at msg-4, where
+     * myFreeVecPPC found no cookie and halted. A block without the cookie is
+     * now freed by FreeVec68K, which is FreeVec32 by Run68K (supportppc.c).
+     * WarpOS hands a 68k XMsg to the 68k's FreeXMsg (powerpc.p:12951-12958),
+     * telling it by the type; the cookie is read here instead, as a reply
+     * changes the type. 17.13b called FreeVecPPC only
+     * (ppcfunctions.p:1706-1711).
+     */
+    if (message)
+    {
+        if (((ULONG*)message)[-4] == MAGIC_COOKIE)
+        {
+            myFreeVecPPC(PowerPCBase, message);
+        }
+        else
+        {
+            FreeVec68K(PowerPCBase, message);
+        }
+    }
 
 	return;
 }

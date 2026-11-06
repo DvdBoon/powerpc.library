@@ -1400,7 +1400,18 @@ FUNC68K ULONG GortInt(__reg("a1") APTR data, __reg("a5") APTR code)
 					xMessage->mn_Node.ln_Name = (APTR)xMessage->mn_ReplyPort;
 					xMessage->mn_ReplyPort = PowerPCBase->pp_MasterControl;
 					FreeMsgFrame(PowerPCBase, myFrame);
+					/*
+					 * F6: THE RECEIVER SEES THE XMsg TYPE, NT_XMSGPPC, as on
+					 * WarpOS, whose PutXMsg68K links the message without
+					 * touching it (powerpc.s:6207-6212). exec's PutMsg sets
+					 * NT_MESSAGE, so the type is put back before anyone sees
+					 * the message: GortInt runs as an interrupt (libinit.c's
+					 * server, and ZenInt's below), so no task or soft
+					 * interrupt runs before it returns. myFreeXMsg
+					 * (functions68k.c) reads it.
+					 */
 					PutMsg(xPort, xMessage);
+					xMessage->mn_Node.ln_Type = NT_XMSGPPC;
 					break;
 				}
 				case ID_SIG:

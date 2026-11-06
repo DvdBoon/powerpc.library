@@ -44,6 +44,7 @@ void kprintf(STRPTR format, ...);
 
 #define _LVOSetHardware         -540
 #define _LVOCreateTaskPPC       -336
+#define _LVOFreeXMsgPPC         -672    //F6: "lwz r0,-670(r3)", ppc-warpos inline/powerpc_protos.h:198, the entry's address word at LVO+2
 #define _LVOLoadSeg             -150
 #define _LVONewLoadSeg          -768
 #define _LVOAllocMem            -198

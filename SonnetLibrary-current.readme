@@ -349,6 +349,10 @@ What has changed since 17.15:
   pool was stopped with an error, and every later PPC allocation then
   hung. Both now return at once, as in WarpOS, and AllocPooledPPC() also
   returns NULL for a size of 0.
+- A program that freed an XMsg made on the other CPU, with FreeXMsgPPC()
+  or FreeXMsg(), was stopped with an error or corrupted memory. Each now
+  hands it to the side that made it, as in WarpOS, and a PPC XMsg reaches
+  a 68k port with its type, NT_XMSGPPC, as in WarpOS.
 
 What has changed since 17.14:
 

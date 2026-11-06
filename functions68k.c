@@ -830,6 +830,34 @@ LIBFUNC68K struct Message* myAllocXMsg(__reg("a6") struct PPCBase* PowerPCBase,
 
 LIBFUNC68K void myFreeXMsg(__reg("a6") struct PPCBase* PowerPCBase, __reg("a0") struct Message* myXMsg)
 {
+    /*
+     * F6: A PPC XMsg GOES TO THE PPC. AllocXMsgPPC's block is pooled PPC
+     * memory with MAGIC_COOKIE at msg-16 (functionsppc.c myAllocVecPPC, the
+     * line flushed by myAllocXMsgPPC); FreeVec32 took its size word at msg-4
+     * for an AllocVec pointer and corrupted the memory list. Such a block, or
+     * one with the type PutXMsgPPC sets (GortInt now keeps it on delivery,
+     * support68k.c), is freed by FreeXMsgPPC through RunPPC, as WarpOS
+     * (powerpc.s:1151-1154). FreeXMsgPPC frees a 68k block the 68k way, so a
+     * stray one still ends right. 17.13b called FreeVec32 only (its
+     * powerpc.s:4246-4249).
+     */
+    if ((myXMsg) && ((((ULONG*)myXMsg)[-4] == MAGIC_COOKIE) || (myXMsg->mn_Node.ln_Type == NT_XMSGPPC)))
+    {
+        struct PPCArgs pa;
+        LONG i;
+
+        for (i = 0; i < (LONG)(sizeof(pa) / 4); i++)
+        {
+            ((ULONG*)&pa)[i] = 0;
+        }
+        pa.PP_Code    = (APTR)PowerPCBase;
+        pa.PP_Offset  = _LVOFreeXMsgPPC;
+        pa.PP_Regs[0] = (ULONG)PowerPCBase;     //r3
+        pa.PP_Regs[1] = (ULONG)myXMsg;          //r4
+        myRunPPC((struct PrivatePPCBase*)PowerPCBase, &pa);
+        return;
+    }
+
     FreeVec32((APTR)myXMsg);
     return;
 }
