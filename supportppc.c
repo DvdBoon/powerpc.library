@@ -505,41 +505,43 @@ PPCFUNCTION VOID DeallocatePPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
 
         if (freeSize &= -32)
         {
-	        struct MemChunk* testChunk = (struct MemChunk*)memoryBlock;
+            /*
+             * F7: THE FREED BLOCK JOINS THE FREE CHUNK BELOW IT WHEREVER IT
+             * LIES. The walk stops at the last free chunk below the block; a
+             * chunk at the block itself is a double free, one reaching into
+             * it an overlap, and one ending at it is joined. As 17.13b
+             * (ppcfunctions.p:7123-7153). Before, that test ran only when a
+             * free chunk lay above the block: one freed above the last free
+             * chunk was linked with no join and no overlap test. testChunk
+             * is the 32-aligned start (above), which a second declaration
+             * here used to hide.
+             */
             struct MemChunk* currChunk = (struct MemChunk*)&memHeader->mh_First;
 
-	        ULONG flag = 0;
-
-	        while (currChunk->mc_Next)
-	        {
-		        if (currChunk->mc_Next > testChunk)
-		        {
-			        if ((currChunk == (struct MemChunk*)&memHeader->mh_First) || ((ULONG)testChunk > currChunk->mc_Bytes + (ULONG)currChunk))
-			        {
-                        break;
-			        }
-			        else if ((ULONG)testChunk < currChunk->mc_Bytes + (ULONG)currChunk)
-			        {
-                        HaltError(ERR_EMEM);
-			        }
-			        flag = 1;
-                    currChunk->mc_Bytes += freeSize;
-		            testChunk = currChunk;
-			        break;
-		        }
-		        else if (currChunk->mc_Next == testChunk)
-		        {
-                    HaltError(ERR_EMEM);
-		        }
-	            currChunk = currChunk->mc_Next;
-	        }
-	
-            if (!(flag))
+            while ((currChunk->mc_Next) && (currChunk->mc_Next < testChunk))
             {
-		        testChunk->mc_Next = currChunk->mc_Next;
-		        currChunk->mc_Next = testChunk;
-		        testChunk->mc_Bytes = freeSize;
-	        }
+                currChunk = currChunk->mc_Next;
+            }
+            if (currChunk->mc_Next == testChunk)
+            {
+                HaltError(ERR_EMEM);
+            }
+
+            if ((currChunk != (struct MemChunk*)&memHeader->mh_First) && ((ULONG)testChunk <= currChunk->mc_Bytes + (ULONG)currChunk))
+            {
+                if ((ULONG)testChunk < currChunk->mc_Bytes + (ULONG)currChunk)
+                {
+                    HaltError(ERR_EMEM);
+                }
+                currChunk->mc_Bytes += freeSize;
+                testChunk = currChunk;
+            }
+            else
+            {
+                testChunk->mc_Next = currChunk->mc_Next;
+                currChunk->mc_Next = testChunk;
+                testChunk->mc_Bytes = freeSize;
+            }
 
 	        struct MemChunk* nextChunk = testChunk->mc_Next;
 	

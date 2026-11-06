@@ -4215,7 +4215,18 @@ PPCFUNCTION APTR myAllocPooledPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase
 
     myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemMemory);
 
-    if (myHeader->ph_ThresholdSize < size)
+    /*
+     * F4: A REQUEST THAT CAN NEVER FIT IN A PUDDLE GETS ITS OWN BLOCK, as one
+     * above the threshold does. A puddle chunk is size + 32 (the header),
+     * so sizes in (PuddleSize - 32, ThresholdSize] failed in every puddle,
+     * returned NULL, and left an empty puddle behind on each call (two on
+     * the first). The user's option B, beyond WarpOS, which rounds puddles
+     * up to 4K (pool.c:47) and frees a puddle it cannot use (pool.c:170)
+     * but still refuses what does not fit. With this test a fresh puddle
+     * always fits, so none is left empty. myFreePooledPPC below decides
+     * with the same test.
+     */
+    if ((myHeader->ph_ThresholdSize < size) || ((size + 32) > myHeader->ph_PuddleSize))
     {
         if (memBlock = AllocVec68K(PowerPCBase, size+32, myHeader->ph_Requirements))
         {
@@ -4325,7 +4336,7 @@ PPCFUNCTION VOID myFreePooledPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase,
 
     myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemMemory);
 
-    if (myHeader->ph_ThresholdSize < size)
+    if ((myHeader->ph_ThresholdSize < size) || ((size + 32) > myHeader->ph_PuddleSize))     //F4: myAllocPooledPPC's test, so a block is freed the way it was made
     {
         myRemovePPC(PowerPCBase, (struct Node*)mem);
         FreeVec68K(PowerPCBase, (APTR)mem);

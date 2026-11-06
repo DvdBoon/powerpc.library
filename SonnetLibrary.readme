@@ -364,6 +364,10 @@ What has changed since 17.15:
   precision as a minimum (printing too much, or bytes past the end of a
   string), and cut strings of 256 characters or more. All three now work
   as in WarpOS.
+- AllocPooledPPC() failed for a size close to the pool's puddle size and
+  left an empty puddle behind on every try, and FreePooledPPC() did not
+  always join the freed memory to the free space below it. Such a request
+  now gets its own block, and freed memory joins up as in 17.13b.
 
 What has changed since 17.14:
 
