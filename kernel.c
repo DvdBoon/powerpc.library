@@ -2496,37 +2496,78 @@ PPCKERNEL ULONG KSystemCall(__reg("r3") struct PrivatePPCBase* PowerPCBase, __re
 *
 *********************************************************************************************/
 
-PPCKERNEL VOID FlushDCache(__reg("r3") struct PrivatePPCBase* PowerPCBase)
+PPCKERNEL VOID FlushDCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") ULONG withL2)
 {
-    ULONG cacheSize;
+    /*
+     * C3 (REVIEW-LIB.md), 7 Nov 2026. THE WHOLE-CACHE FLUSH BY DISPLACEMENT.
+     * It reads a range from EA 0 that is larger than the cache, so every
+     * line the program left dirty is cast out to memory, then flushes the
+     * range. Three changes to 17.15's one pass (load, then dcbf):
+     *
+     * - The range is flushed FIRST. Part of it is always cached and dirty --
+     *   page zero (the tick counter, SRR0 and SRR1 share its first line)
+     *   and 0x2000-0x21DF, written at every exception entry -- and a load
+     *   that hits a cached line does not displace anything: it only
+     *   reorders the pseudo-LRU, so an old line can stay. Flushed first,
+     *   every load below is a miss that takes a way.
+     * - The range is the L2 plus TWO times the L1 (17.15: plus one). The
+     *   8-way tree-PLRU L1 fills invalid ways first, and one pass of eight
+     *   lines per set does not always reach every way; sixteen distinct
+     *   lines per set do. On a model of that cache, over every PLRU state
+     *   and every pattern of empty ways: an old line stayed in 0 of 32,640
+     *   cases (after a first flush, one pass of eight left one in 72%;
+     *   17.15's pass, with one range line already cached, in 14%).
+     * - withL2 forces the L2 into the range even with DisL2Flush set
+     *   (pp_CacheDisDFlushAll). DCACHEOFF and L2CACHEOFF need it: the L1
+     *   stops using the L2 when it is switched off, and L2CACHEOFF drops
+     *   whatever the L2 holds. A plain full flush and DCACHELOCK still
+     *   obey DisL2Flush.
+     *
+     * AGAINST THE ORIGINALS. 17.13b displaces from the top 4 MB of the card's
+     * memory and, on a 7410, flushes the L2 with its hardware flush
+     * (ppcfunctions.p:1536-1569, :1582-1585); it too skips the L2 under
+     * DisL2Flush for every caller (:1529-1534). WarpOS flushes by dcbz over a
+     * private buffer of the L1's size (warp.p:323-349, :2840-2858) and has no
+     * L2. THIS DIVERGES from both: the range is flushed before and after,
+     * and sized to leave no line behind. Test: tests/cacheflush.
+     */
+    ULONG lines;
+    ULONG mem;
+    ULONG i;
 
-    if (PowerPCBase->pp_CacheDisDFlushAll)
+    if ((PowerPCBase->pp_CacheDisDFlushAll) && !(withL2))
     {
-        cacheSize = 0;
+        lines = 0;
     }
     else
     {
-        cacheSize = PowerPCBase->pp_CurrentL2Size;
+        lines = PowerPCBase->pp_CurrentL2Size >> 5;
     }
 
-    cacheSize = (cacheSize >> 5) + CACHE_L1SIZE;
-    //ULONG mem = ((PowerPCBase->pp_PPCMemSize - 0x400000) + PowerPCBase->pp_PPCMemBase);
+    lines += 2 * CACHE_L1SIZE;
 
-    ULONG mem = 0;
+    mem = 0;
+    for (i = 0; i < lines; i++)
+    {
+        dFlush(mem);
+        mem += CACHELINE_SIZE;
+    }
+    sync();
 
-    ULONG mem2 = mem;
-
-    for (int i = 0; i < cacheSize; i++)
+    mem = 0;
+    for (i = 0; i < lines; i++)
     {
         loadWord(mem);
         mem += CACHELINE_SIZE;
     }
 
-    for (int i = 0; i < cacheSize; i++)
+    mem = 0;
+    for (i = 0; i < lines; i++)
     {
-        dFlush(mem2);
-        mem2 += CACHELINE_SIZE;
+        dFlush(mem);
+        mem += CACHELINE_SIZE;
     }
+    sync();
 
     return;
 }
@@ -2590,7 +2631,10 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
         {
             if (!(PowerPCBase->pp_CacheDState))
             {
-                FlushDCache(PowerPCBase);
+                /* C3: with the L2 whatever DisL2Flush says. Nothing stores
+                 * between this call's return and the HID0 write, so no line
+                 * is dirtied before the cache goes off. */
+                FlushDCache(PowerPCBase, 1);
 
                 value = getHID0();
                 value &= ~HID0_DCE;
@@ -2601,17 +2645,35 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
         }
         case CACHE_DCACHEON:
         {
-            PowerPCBase->pp_CacheDState = 0;
+            /*
+             * C4: A CACHE SWITCHED BACK ON IS FLASH-INVALIDATED. While DCE is
+             * off the L1 is not looked at, but it keeps its lines, and
+             * switched on again they serve data that memory has since
+             * changed. Nothing dirty is lost: DCACHEOFF flushed everything.
+             * The invalidate must come after the enable -- the e300 does it
+             * only in an enabled cache, and wants DCFI set and cleared by two
+             * consecutive mtspr (MPC8349EA RM Table 7-2 for the K1's
+             * MPC8343E, MPC8315ERM Table 7-3, PDF pp. 351-352, for the
+             * MPC8314E) -- and is not done when the cache is already on,
+             * which would drop dirty lines. 17.13b (ppcfunctions.p:307-321)
+             * and WarpOS (DCacheOn_S, warp.p:553-558) set the bit alone:
+             * THIS DIVERGES, rightly.
+             */
             value = getHID0();
-            value |= HID0_DCE;
-            setHID0(value);
+            if (!(value & HID0_DCE))
+            {
+                value |= HID0_DCE;
+                setHID0(value);
+                flashInvD(value);
+            }
+            PowerPCBase->pp_CacheDState = 0;
             break;
         }
         case CACHE_DCACHELOCK:
         {
             if ((start) && (length) && !(PowerPCBase->pp_CacheDLockState))
             {
-                FlushDCache(PowerPCBase);
+                FlushDCache(PowerPCBase, 0);
                 ULONG iterations = (ULONG)start + length;
                 ULONG mask = -32;
                 start = (APTR)((ULONG)start & mask);
@@ -2644,41 +2706,40 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
         }
         case CACHE_DCACHEFLUSH:
         {
+            /*
+             * C5: THE RANGE IS FLUSHED ON EVERY CARD. 17.15 gave a card with
+             * no L2 (pp_L2Size 0: the K1 and both M1s) a branch that read 32 KB
+             * from EA 0 and never touched the range -- slow on every call
+             * (Run68K makes one, iFUSION up to 2048 a frame), and not a flush:
+             * a line of the range could stay dirty. With no L2 the L1 is all
+             * there is, and dcbf acts on it. 17.13b flushes the range on every
+             * CPU (ppcfunctions.p:405-435) and so does WarpOS
+             * (DCacheFlushArea, warp.p:195-223): THIS MATCHES. A flush with no
+             * range is the whole-cache flush, FlushDCache, on every card.
+             */
             if (!(PowerPCBase->pp_CacheDState) && !(PowerPCBase->pp_CacheDLockState))
             {
-                if (PowerPCBase->pp_L2Size)
+                if ((start) && (length))
                 {
-                    if ((start) && (length))
-                    {
-                        ULONG iterations = (ULONG)start + length;
-                        ULONG mask = -32;
-                        start = (APTR)((ULONG)start & mask);
-                        ULONG mem = (ULONG)start;
-                        iterations = (((iterations + 31) & mask) - (ULONG)start) >> 5;
+                    ULONG iterations = (ULONG)start + length;
+                    ULONG mask = -32;
+                    start = (APTR)((ULONG)start & mask);
+                    ULONG mem = (ULONG)start;
+                    iterations = (((iterations + 31) & mask) - (ULONG)start) >> 5;
 
-                        for (int i = 0; i < iterations; i++)
-                        {
-                            if (KCachedLine(PowerPCBase, mem))      //C2
-                            {
-                                dFlush(mem);
-                            }
-                            mem += CACHELINE_SIZE;
-                        }
-                        sync();
-                    }
-                    else
+                    for (int i = 0; i < iterations; i++)
                     {
-                        FlushDCache(PowerPCBase);
+                        if (KCachedLine(PowerPCBase, mem))      //C2
+                        {
+                            dFlush(mem);
+                        }
+                        mem += CACHELINE_SIZE;
                     }
+                    sync();
                 }
                 else
                 {
-                    ULONG mem = 0;
-                    for (int i = 0; i < CACHE_L1SIZE; i++)
-                    {
-                        loadWord(mem);
-                        mem += CACHELINE_SIZE;
-                    }
+                    FlushDCache(PowerPCBase, 0);
                 }
             }
             break;
@@ -2692,9 +2753,18 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
         }
         case CACHE_ICACHEON:
         {
+            /* C4: switched on from off, the I-cache is flash-invalidated
+             * after the enable, as DCACHEON. WarpOS (ICacheOn_S,
+             * warp.p:749-754) and 17.13b (.ICACHEON, ppcfunctions.p:337-348)
+             * set the bit alone: THIS DIVERGES; the invalidate only discards
+             * clean lines. */
             value = getHID0();
-            value |= HID0_ICE;
-            setHID0(value);
+            if (!(value & HID0_ICE))
+            {
+                value |= HID0_ICE;
+                setHID0(value);
+                flashInvI(value);
+            }
             break;
         }
         case CACHE_ICACHELOCK:
@@ -2713,35 +2783,27 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
         }
         case CACHE_DCACHEINV:
         {
+            /* C5: dcbi on the range on every card, as DCACHEFLUSH above. On
+             * 17.15's branch for a card with no L2 a dirty line was written
+             * back instead of discarded. 17.13b: ppcfunctions.p:174-200;
+             * WarpOS: DCacheInvArea, warp.p:375-400. THIS MATCHES. */
             if ((start) && (length))
             {
-                if (PowerPCBase->pp_L2Size)
-                {
-                    ULONG iterations = (ULONG)start + length;
-                    ULONG mask = -32;
-                    start = (APTR)((ULONG)start & mask);
-                    ULONG mem = (ULONG)start;
-                    iterations = (((iterations + 31) & mask) - (ULONG)start) >> 5;
+                ULONG iterations = (ULONG)start + length;
+                ULONG mask = -32;
+                start = (APTR)((ULONG)start & mask);
+                ULONG mem = (ULONG)start;
+                iterations = (((iterations + 31) & mask) - (ULONG)start) >> 5;
 
-                    for (int i = 0; i < iterations; i++)
-                    {
-                        if (KCachedLine(PowerPCBase, mem))          //C2
-                        {
-                            dInval(mem);
-                        }
-                        mem += CACHELINE_SIZE;
-                    }
-                    sync();
-                }
-                else
+                for (int i = 0; i < iterations; i++)
                 {
-                    ULONG mem = 0;
-                    for (int i = 0; i < CACHE_L1SIZE; i++)
+                    if (KCachedLine(PowerPCBase, mem))          //C2
                     {
-                        loadWord(mem);
-                        mem += CACHELINE_SIZE;
+                        dInval(mem);
                     }
+                    mem += CACHELINE_SIZE;
                 }
+                sync();
             }
             break;
         }
@@ -2778,7 +2840,21 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
         {
             case  CACHE_L2CACHEON:
             {
+                /*
+                 * C4: AN L2 SWITCHED BACK ON IS INVALIDATED FIRST. Off, the L2
+                 * keeps its lines; on again, they serve data memory has since
+                 * changed. As setupCaches does it (setupppc.c): L2I with L2E
+                 * clear, wait for L2IP, then L2E -- only when it is off (L2I
+                 * on a running L2 would drop dirty lines) and there is an L2.
+                 * 17.13b (ppcfunctions.p:138-151) sets L2E alone: THIS
+                 * DIVERGES, rightly.
+                 */
                 value = getL2State();
+                if ((PowerPCBase->pp_L2Size) && !(value & L2CR_L2E))
+                {
+                    setL2State(value | L2CR_L2I);
+                    while (getL2State() & L2CR_L2IP);
+                }
                 value |= L2CR_L2E;
                 setL2State(value);
                 PowerPCBase->pp_CurrentL2Size = PowerPCBase->pp_L2Size;
@@ -2786,7 +2862,7 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
             }
             case CACHE_L2CACHEOFF:
             {
-                FlushDCache(PowerPCBase);
+                FlushDCache(PowerPCBase, 1);               //C3: with the L2 whatever DisL2Flush says
                 value = getL2State();
                 value &= ~L2CR_L2E;
                 setL2State(value);

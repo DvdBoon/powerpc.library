@@ -374,6 +374,12 @@ What has changed since 17.15:
   starts and runs PPC programs: it is entered through its external-interrupt
   vector, and its MMU page table is placed at the top of the card's memory
   and kept out of the memory pool.
+- SetCache() on a card without an L2 (K1, M1) did not flush or invalidate
+  the range it was given, and Run68K() flushed too few of its stack
+  arguments. Flushing the whole data cache could leave modified lines
+  behind, and with DisL2Flush set, turning the L2 off lost its data. A cache
+  switched back on kept its old lines. All fixed. The Killer's L1 caches are
+  also cleared at start-up.
 
 What has changed since 17.14:
 

@@ -102,7 +102,22 @@ PPCFUNCTION LONG myRun68K(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
 	{
 		if(PPStruct->PP_StackSize)
 		{
-            mySetCache(PowerPCBase, CACHE_DCACHEFLUSH, PPStruct->PP_Stack, PPStruct->PP_StackSize);
+            /*
+             * Q7: FLUSH WHAT THE 68k COPIES. Its Run68K (functions68k.s:165-172)
+             * copies PP_StackSize rounded up to 4 bytes from PP_Stack + 24
+             * ("Offset needs to be 24 according to Run68K docs"), so the last
+             * 24 bytes, and the rounding, lay outside [PP_Stack, +size) and
+             * could still be dirty in the PPC's L1/L2 -- stale for a 68k whose
+             * PCI window does not snoop. 17.13b flushes [PP_Stack, +size) too
+             * (ppcfunctions.p:3682-3700); WarpOS flushes the whole data cache
+             * on this path first (powerpc.p:1441), its 68k side copying from
+             * +24 the same (powerpc.s:4305-4307). THIS DIVERGES from both: the
+             * range the 68k reads, not the whole cache, which is the dearer.
+             * Test: tests/cacheflush.
+             */
+            mySetCache(PowerPCBase, CACHE_DCACHEFLUSH,
+                       (APTR)((ULONG)PPStruct->PP_Stack + 24),
+                       (PPStruct->PP_StackSize + 3) & ~3UL);
 		}
 		else
 		{

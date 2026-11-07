@@ -739,6 +739,22 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
             pll = (value1 >> 25) & 0x7f;
             value0 |= HID0_ICE | HID0_DCE | HID0_EMCP;
             setHID0(value0);
+            /*
+             * C6: THE L1 IS FLASH-INVALIDATED HERE, AFTER THE ENABLE. The one
+             * at the start (setupppc.s, DCFI|ICFI) runs with both caches off,
+             * and the e300 invalidates only an enabled cache (MPC8349EA RM
+             * Table 7-2; MPC8315ERM Table 7-3, PDF pp. 351-352), so it did
+             * nothing. A cache that was off keeps its lines: on the PCIe M1,
+             * whose core was running the card's own Linux with its caches on,
+             * those are Linux's lines -- stale ones that would shadow what this
+             * set-up wrote with the caches off, and dirty ones that would later
+             * be written back over the library's memory. The core has been
+             * running this code with the caches off since _Reset, so no line
+             * of ours is in them to lose. 17.13b's Caches routine enables them
+             * with no invalidate at all (setupppc.p:1082-1090): THIS DIVERGES,
+             * rightly. WarpOS starts no second CPU: NO COUNTERPART.
+             */
+            flashInvDI(value0);
             switch (pll)
             {
                 case 0x23:

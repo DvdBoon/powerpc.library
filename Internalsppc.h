@@ -105,6 +105,12 @@ ULONG getMSR(void)                        = "\tmfmsr\tr3\n";
 ULONG getHID0(void)                       = "\tmfspr\tr3,1008\n";
 ULONG getHID1(void)                       = "\tmfspr\tr3,1009\n";
 void  setHID0(ULONG)                      = "\tsync\n\tmtspr\t1008,r3\n\tsync\n\tisync\n";
+//C4, C6: flash invalidate of an L1 cache that is ENABLED in hid0 (the e300 invalidates only an enabled cache).
+//The bit (HID0 DCFI 0x400, ICFI 0x800, both 0xc00) is set and cleared by two consecutive mtspr, as the e300
+//manuals say (MPC8349EA RM Table 7-2; MPC8315ERM Table 7-3). It discards modified lines without writing them back.
+void  flashInvD(ULONG hid0)               = "\tori\tr4,r3,0x400\n\tsync\n\tmtspr\t1008,r4\n\tmtspr\t1008,r3\n\tsync\n\tisync\n";
+void  flashInvI(ULONG hid0)               = "\tori\tr4,r3,0x800\n\tsync\n\tmtspr\t1008,r4\n\tmtspr\t1008,r3\n\tsync\n\tisync\n";
+void  flashInvDI(ULONG hid0)              = "\tori\tr4,r3,0xc00\n\tsync\n\tmtspr\t1008,r4\n\tmtspr\t1008,r3\n\tsync\n\tisync\n";
 void  setDEC(LONG value)                  = "\tmtdec\tr3\n";
 ULONG getDEC(void)                        = "\tmfdec\tr3\n";
 ULONG getTBU(void)                        = "\tmftbu\tr3\n";
@@ -387,7 +393,7 @@ void KillTask(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFrame* myF
 ULONG CommonExcHandler(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct iframe* iframe, __r5 struct List* excList);
 void CommonExcError(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct iframe* iframe);
 VOID CPUStats(__r3 struct PrivatePPCBase* PowerPCBase);
-VOID FlushDCache(__r3 struct PrivatePPCBase* PowerPCBase);
+VOID FlushDCache(__r3 struct PrivatePPCBase* PowerPCBase, __r4 ULONG withL2);
 VOID EndTask(VOID);
 ULONG GetLen(__r3 STRPTR string);
 STRPTR CopyStr(__r3 APTR source, __r4 APTR dest);
