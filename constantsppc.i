@@ -250,6 +250,7 @@
 .set ZP_ENTRY_R4,               0x21CC
                                                   #0x21D0 is constants.h's MMU_ZERO_BUILDMARK
 .set ZP_EXIT_ICFLUSH,           0x21D4            #nonzero: this exit flushes the I-cache (another task resumes, or nested)
+.set ZP_CLEARRES,               0x21E0            #K6: a dedicated 32-byte line, 0x21E0-0x21FF: the exit stwcx.'s to it when another task resumes
 .set VSID_TAG_HI,               0x0080            #VSID bit 23 >> 16: a task whose SR0 has it needs no TLB flush
 .set ZP_TIME_T0,                0x2200            #the timing build only: constants.h MMU_ZERO_TIME_*
 .set ZP_TIME_T1,                0x2204
@@ -273,6 +274,7 @@
 .set HID0_NHR,	                0x00010000
 .set HID0_ICFI,                 0x00000800
 .set HID0_DCFI,                 0x00000400
+.set HID0_DLOCK,                0x00001000        #K6: a stwcx. with the D-cache locked takes a DSI (MPC7410UM PDF pp. 145, 155, 215)
 
 .set PSL_VEC,	                0x02000000	      #/* ..6. AltiVec vector unit available */
 .set PSL_FP,	                0x00002000        #/* B.6. floating point enable */

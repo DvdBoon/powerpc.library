@@ -393,6 +393,28 @@ _ExcCommon:
         cmpwi   r0,0                                       #CR comes back from ZP_MMU_EXIT_CR below
         beq     .ICKeep
         bl      _FlushICache
+
+#       K6: A TASK SWITCH ENDS THE RESERVATION. lwarx makes ONE reservation for
+#       the processor, and only a stwcx. by it -- to ANY address, as the
+#       stwcx. does not compare the address (MPC7410UM 3.4.4.4, PDF p. 215) --
+#       or another master's write to that 32-byte section cancels it; an
+#       exception does not. A task preempted between its lwarx and its stwcx.
+#       leaves its reservation standing, and a task that is resumed later and
+#       finishes ITS pair on the same word then succeeds with a stale value: a
+#       lost update. WarpOS stores to a dedicated cache line at every context
+#       save (powerpc.p:4678-4680, the line from powerpc.p:1101-1109); 17.13b
+#       has no clear. This does the same where the I-cache flush above is done,
+#       when another task (or idle) resumes, to the dedicated line ZP_CLEARRES.
+#       The store is made only if a reservation exists, so it must hit a word
+#       nothing else uses. With the D-cache LOCKED a stwcx. takes a DSI on the
+#       7410 (PDF pp. 145, 155, 215), and WarpOS has no guard against it: here
+#       it is skipped then. r3 is free: the task's own is staged in the frame.
+#       FIXES.md "K6 AND T8", 8 Nov 2026. Test: tests/ctxswitch.
+        mfspr   r3,HID0
+        andi.   r3,r3,HID0_DLOCK
+        bne     .ICKeep
+        li      r3,ZP_CLEARRES
+        stwcx.  r0,0,r3
 .ICKeep:
 .ifdef EXC_TIMING
         mftb    r0                                         #T7 after the instruction-cache flush

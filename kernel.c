@@ -575,6 +575,26 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
             if (PowerPCBase->pp_EnAltivec)
             {
                 iframe->if_Context.ec_SRR1 |= PSL_VEC;
+
+                /*
+                 * T8: A NEW TASK'S VECTOR UNIT STARTS IN NON-JAVA MODE, as the
+                 * CPU does. The exit loads VSCR from this frame (kernel.s,
+                 * _LoadFrame), and a task's frame is zero, so every task
+                 * began with VSCR[NJ] = 0, Java mode, where the MPC7410 takes
+                 * the AltiVec assist exception (vector 0x1600) for a denormal
+                 * input or output of vaddfp, vsubfp, vmaddfp and vnmsubfp
+                 * (MPC7410UM Table 7-7, PDF p. 387; 4.6.17, p. 285) -- and
+                 * this kernel has no 0x1600 case, so the task was ended. The
+                 * 7410 resets to VSCR = 0x0001_0000 and "defaults to non-Java
+                 * mode" (Table 2-21, PDF p. 127; 7.1.3, p. 386). 17.13b's tasks
+                 * kept that: its .VMXUnav only sets the VEC bit and touches no
+                 * VSCR (setupppc.p:5253-5335), though it saves and restores
+                 * VSCR per task (:3808-3909, :3981-3992); 17.15 lost it. THIS
+                 * MATCHES 17.13b in effect, not in mechanism. WarpOS has no
+                 * AltiVec: NO COUNTERPART. Word 3 is the one mtvscr reads and
+                 * mfvscr writes. Test: tests/ctxswitch.
+                 */
+                iframe->if_VSCR[3] = VSCR_NJ;
             }
             else
             {

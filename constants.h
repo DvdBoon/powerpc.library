@@ -319,6 +319,11 @@
 #define MMU_ZERO_EXIT_ICFLUSH   0x21D4  /* kernel.s only: nonzero when this exit
                                          * flushes the I-cache (FIXES.md "CAN THE
                                          * PER-TRAP I-CACHE FLUSH GO?") */
+#define MMU_ZERO_CLEARRES       0x21E0  /* kernel.s only, K6: a dedicated 32-byte line
+                                         * to 0x21FF, the target of the exit's stwcx.
+                                         * that ends a task's reservation. Nothing
+                                         * else may live in it; the timing build's
+                                         * words start at 0x2200 */
 #define LIB_BUILDMARK           0x26102405  /* 24 Oct 2026, variant 5: DEC programmed only after
                                              * the decrementer and external exceptions. Variant 4,
                                              * the cached exception stack, was 0x26102504: its
@@ -388,6 +393,11 @@
 #define HID0_SGE                0x00000080
 #define HID0_BTIC               0x00000020
 #define HID0_BHTE               0x00000004
+
+/* T8: VSCR[NJ], non-Java mode. It is the whole of the MPC7410's reset VSCR
+ * (0x0001_0000, MPC7410UM Table 2-21, PDF p. 127) and what a new task's vector
+ * unit now starts with (kernel.c, the AltiVec Unavailable case). */
+#define VSCR_NJ                 0x00010000
 
 #define MMU_PAGESIZE            0x1000
 

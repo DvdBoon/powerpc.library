@@ -387,6 +387,13 @@ What has changed since 17.15:
   behind, and with DisL2Flush set, turning the L2 off lost its data. A cache
   switched back on kept its old lines. All fixed. The Killer's L1 caches are
   also cleared at start-up.
+- A task switch did not cancel a reservation made by lwarx, so a reservation
+  left by one task could let another task's stwcx. succeed when it should have
+  failed, and an atomic update was lost. The switch now cancels it. A task
+  that began using AltiVec started in Java mode, where vaddfp, vsubfp,
+  vmaddfp and vnmsubfp take an AltiVec Assist exception on a denormal number
+  and the task was ended. Tasks now start in non-Java mode, as the processor
+  does after a reset.
 
 What has changed since 17.14:
 
