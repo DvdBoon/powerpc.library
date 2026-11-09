@@ -761,6 +761,7 @@ PPCFUNCTION VOID SystemStart(__reg("r3") struct PrivatePPCBase* PowerPCBase)
     struct TaskPPC* myTask;
     APTR myPool;
     struct MemList* myMem;
+    struct Message* myNotice;
 
     while (1)
     {
@@ -790,6 +791,34 @@ PPCFUNCTION VOID SystemStart(__reg("r3") struct PrivatePPCBase* PowerPCBase)
             {
                 FreeVec68K(PowerPCBase, myMem->ml_ME[0].me_Un.meu_Addr);
                 FreeVec68K(PowerPCBase, myMem);
+            }
+            /*
+             * THE PORT, THEN THE NOTICE, THEN THE TASK -- T3 B and W4 A
+             * (REVIEW-LIB.md), in the order of WarpOS's reaper, USSVoyager
+             * (powerpc.p:3700-3735): what the task owned, the notice, the task.
+             * - THE PORT of a CreateTaskPPC task is freed here, no longer by the
+             *   dying task itself (functionsppc.c, DeleteTaskPPC): its own
+             *   FreeVec68K waits for the 68k's reply ON that port. A task killed
+             *   by ID_END (KillTask) never freed it at all. The waits here are
+             *   Kryten's own, on Kryten's port. A 68k-started task's port is
+             *   inside its NewTask and goes with it.
+             * - THE NOTICE is the message TASKATTR_NOTIFYMSG gave the task
+             *   (tp_MessageRIP, functionsppc.c CreateTaskPPC), put on the
+             *   message's own reply port once the task is removed from the
+             *   system (WarpOS History.txt, 23.8.2000; powerpc.p:3724-3732, which
+             *   sends nothing for a message with no reply port). Kryten runs
+             *   every ~5 s, so it can come that late: WarpOS signals its reaper
+             *   at once (powerpc.p:9512-9514), this does not.
+             * - THE TaskPtr is inside the task block and goes with it.
+             */
+            if ((myTask->tp_Flags & TASKPPCF_CREATORPPC) && (myTask->tp_Msgport))
+            {
+                FreeVec68K(PowerPCBase, myTask->tp_Msgport->mp_Semaphore.ssppc_reserved);
+                FreeVec68K(PowerPCBase, myTask->tp_Msgport);
+            }
+            if ((myNotice = myTask->tp_MessageRIP) && (myNotice->mn_ReplyPort))
+            {
+                myPutMsgPPC(PowerPCBase, (struct MsgPortPPC*)myNotice->mn_ReplyPort, myNotice);
             }
             FreeVec68K(PowerPCBase, myTask);
          }

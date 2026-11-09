@@ -387,6 +387,14 @@ What has changed since 17.15:
   vmaddfp and vnmsubfp take an AltiVec Assist exception on a denormal number
   and the task was ended. Tasks now start in non-Java mode, as the processor
   does after a reset.
+- A message for a task that was being removed could wake it again, and it
+  then stayed on the CPU for ever instead of being freed (with an atomic
+  task, the whole PPC stopped). It now stays removed. The port of a task
+  made with CreateTaskPPC is freed by the system task that frees the rest of
+  its memory, not by the dying task. TASKATTR_NOTIFYMSG now works: the
+  message you give is sent to its reply port once the task has been removed,
+  which can take a few seconds. About 1 KB of every task made with
+  CreateTaskPPC was never given back; it is now.
 
 What has changed since 17.14:
 

@@ -412,6 +412,21 @@ PPCFUNCTION LONG myFreeVecPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
 
 /********************************************************************************************
 *
+*	THE TaskPtr OF A CreateTaskPPC TASK IS CARVED FROM ITS TASK BLOCK (W4, REVIEW-LIB.md).
+*	It was a block of its own, AllocVec68K'd (a Run68K), unlinked at the task's
+*	death and never freed by any of the removals: 17.13b's "Dummy MirrorTask?" of
+*	18 bytes (ppcfunctions.p:5206-5220), WarpOS's AllocVecPPC of TASKPTR_SIZE
+*	(powerpc.p:9279-9287). Two of the removals clear tp_TaskPtr (W3), so no
+*	pointer was left to free it by. Carved from the task block it goes with the
+*	task, freed by Kryten; a 68k-started task already has its TaskPtr inside its
+*	NewTask (kernel.c, DispatchPPC). TASKPTR_AT rounds its start up to a longword.
+*
+*********************************************************************************************/
+
+#define TASKPTR_AT      ((sizeof(struct PrivateTask) + 3) & ~3UL)
+
+/********************************************************************************************
+*
 *
 *
 *********************************************************************************************/
@@ -442,7 +457,7 @@ PPCFUNCTION struct TaskPPC* myCreateTaskPPC(__reg("r3") struct PrivatePPCBase* P
 
     if (myCode = myGetTagDataPPC(PowerPCBase, TASKATTR_CODE, 0, taglist))
     {
-        if (newTask = AllocVec68K(PowerPCBase, sizeof(struct PrivateTask), MEMF_PUBLIC | MEMF_CLEAR))
+        if (newTask = AllocVec68K(PowerPCBase, TASKPTR_AT + sizeof(struct TaskPtr), MEMF_PUBLIC | MEMF_CLEAR))
         {
             newTask->tp_Link.tl_Task = newTask;
             newTask->tp_Link.tl_Sig = 0xfff;
@@ -620,120 +635,126 @@ PPCFUNCTION struct TaskPPC* myCreateTaskPPC(__reg("r3") struct PrivatePPCBase* P
                                                         memPort->mp_Port.mp_Node.ln_Type = NT_MSGPORTPPC;
                                                         newTask->tp_Msgport = memPort;
 
-                                                        newTask->tp_PoolMem = myGetTagDataPPC(PowerPCBase, TASKATTR_NOTIFYMSG, 0, taglist);
+                                                        /*
+                                                         * W4 (REVIEW-LIB.md): THE NOTICE. TASKATTR_NOTIFYMSG is a message the
+                                                         * application supplies; once the child is removed from the system it is sent
+                                                         * to the message's reply port (WarpOS History.txt, 23.8.2000). WarpOS keeps it
+                                                         * in tp_MessageRIP (powerpc.p:9263-9267) and its reaper sends it
+                                                         * (powerpc.p:3724-3732); here Kryten does (supportppc.c SystemStart).
+                                                         * 17.13b and 17.15 stored it in tp_PoolMem, which nothing read, and put a
+                                                         * 928-byte block that nothing read either in tp_MessageRIP
+                                                         * (ppcfunctions.p:5184-5202, whose own comment says it was never
+                                                         * implemented). That block is no longer allocated, and with it goes the
+                                                         * free of tp_MessageRIP on the failure path: it would now free the
+                                                         * application's message.
+                                                         */
+                                                        newTask->tp_MessageRIP = (struct Message*)myGetTagDataPPC(PowerPCBase, TASKATTR_NOTIFYMSG, 0, taglist);
 
-                                                        if (newTask->tp_MessageRIP = AllocVec68K(PowerPCBase, 928, MEMF_PUBLIC | MEMF_CLEAR))
+                                                        taskPtr = (struct TaskPtr*)((ULONG)newTask + TASKPTR_AT);        //carved from the task block, see TASKPTR_AT
+                                                        taskPtr->tptr_Task = newTask;
+                                                        newTask->tp_TaskPtr = taskPtr;
+                                                        taskPtr->tptr_Node.ln_Name = newTask->tp_Task.tc_Node.ln_Name;
+
+                                                        myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemTaskList);
+                                                        myAddTailPPC(PowerPCBase, (struct List*)&PowerPCBase->pp_AllTasks, (struct Node*)taskPtr);
+                                                        PowerPCBase->pp_NumAllTasks += 1;
+                                                        myReleaseSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemTaskList);
+
+                                                        while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
+
+                                                        if (newTask->tp_Flags & TASKPPCF_SYSTEM)
                                                         {
-                                                            if (taskPtr = AllocVec68K(PowerPCBase, sizeof(struct TaskPtr), MEMF_PUBLIC | MEMF_CLEAR))
-                                                            {
-                                                                taskPtr->tptr_Task = newTask;
-                                                                newTask->tp_TaskPtr = taskPtr;
-                                                                taskPtr->tptr_Node.ln_Name = newTask->tp_Task.tc_Node.ln_Name;
-
-                                                                myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemTaskList);
-                                                                myAddTailPPC(PowerPCBase, (struct List*)&PowerPCBase->pp_AllTasks, (struct Node*)taskPtr);
-                                                                PowerPCBase->pp_NumAllTasks += 1;
-                                                                myReleaseSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemTaskList);
-
-                                                                while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
-
-                                                                if (newTask->tp_Flags & TASKPPCF_SYSTEM)
-                                                                {
-                                                                    PowerPCBase->pp_IdSysTasks += 1;
-                                                                    newTask->tp_Id = PowerPCBase->pp_IdSysTasks;
-                                                                }
-                                                                else
-                                                                {
-                                                                    PowerPCBase->pp_IdUsrTasks += 1;
-                                                                    newTask->tp_Id = PowerPCBase->pp_IdUsrTasks;
-                                                                }
-
-                                                                newTask->tp_Quantum = PowerPCBase->pp_StdQuantum;
-                                                                newTask->tp_Task.tc_State = TS_READY;
-                                                                /*
-                                                                 * tp_Desired IS COMPUTED HERE, NOT LEFT TO CPUStats,
-                                                                 * powerpc.p:9329-9337 inside IFNE NEWSCHEDULER:
-                                                                 *
-                                                                 *     lwz   r7,TASKPPC_NICE(r31)
-                                                                 *     addi  r8,r7,NICE_RANGE/2
-                                                                 *     slwi  r8,r8,2
-                                                                 *     lwz   r7,PPC_NICETAB(r23)
-                                                                 *     lwzx  r8,r7,r8
-                                                                 *     srwi  r8,r8,8
-                                                                 *     liw   r7,PRI_OFFSET*65536
-                                                                 *     divwu r0,r7,r8
-                                                                 *     stw   r0,TASKPPC_DESIRED(r31)
-                                                                 *
-                                                                 * which is CPUStats' formula with activity 0, since a
-                                                                 * task that has never run has no activity to measure.
-                                                                 *
-                                                                 * This said "= 0; //CPUStats computes it from the NICE
-                                                                 * table" and that mattered as soon as the V14 rule went
-                                                                 * in: priDecay declines to judge a task whose tp_Desired
-                                                                 * is zero -- it cannot, the quotient would be a division
-                                                                 * by zero -- so a new task took NO penalty until the
-                                                                 * first CPUStats pass, and a nice +19 task created and
-                                                                 * run inside that window was scheduled as nice 0.
-                                                                 *
-                                                                 * tp_Nice is already clamped to -20..20 above, so the
-                                                                 * index is 0..40 and in range. The table is read through
-                                                                 * pp_NICETable rather than by calling GetNiceTable: that
-                                                                 * lives in the SETUP hunk and this is the FUNCTIONS
-                                                                 * hunk, and a direct call between them would land where
-                                                                 * the callee used to be.
-                                                                 */
-                                                                newTask->tp_Desired = 0;
-
-                                                                if (PowerPCBase->pp_NICETable)
-                                                                {
-                                                                    const ULONG* niceTab = (const ULONG*)PowerPCBase->pp_NICETable;
-                                                                    ULONG weight = niceTab[(LONG)newTask->tp_Nice + (NICE_RANGE / 2)] >> 8;
-
-                                                                    if (weight)
-                                                                    {
-                                                                        newTask->tp_Desired = (PRI_OFFSET << 16) / weight;
-                                                                    }
-                                                                }
-                                                                newTask->tp_Flags |= TASKPPCF_CREATORPPC;
-
-                                                                InsertOnPri(PowerPCBase, (struct List*)&PowerPCBase->pp_ReadyTasks, newTask);
-
-                                                                PowerPCBase->pp_FlagReschedule = -1;
-
-                                                                FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
-
-                                                                myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemSnoopList);
-
-                                                                struct SnoopData* currSnoop = (struct SnoopData*)PowerPCBase->pp_Snoop.mlh_Head;
-                                                                struct SnoopData* nextSnoop;
-
-                                                                while (nextSnoop = (struct SnoopData*)currSnoop->sd_Node.ln_Succ)
-                                                                {
-                                                                    if (currSnoop->sd_Type == SNOOP_START)
-                                                                    {
-                                                                        ULONG (*runSnoop)(__reg("r2") ULONG, __reg("r3") struct TaskPPC*,
-                                                                                          __reg("r4") ULONG, __reg("r5") struct TaskPPC*,
-                                                                                          __reg("r6") ULONG) = currSnoop->sd_Code;
-                                                                        ULONG tempR2 = getR2();
-                                                                        runSnoop(currSnoop->sd_Data, newTask, myCode, currTask, CREATOR_PPC);
-                                                                        storeR2(tempR2);
-                                                                    }
-                                                                    currSnoop = nextSnoop;
-                                                                }
-
-                                                                myReleaseSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemSnoopList);
-
-                                                                CauseDECInterrupt(PowerPCBase);
-
-                                                                currTask->tp_Flags &= ~TASKPPCF_CHOWN;
-                                                                args.db_Arg[0] = (ULONG)newTask;
-                                                                printDebug(PowerPCBase, (struct DebugArgs*)&args);
-
-                                                                return newTask;
-                                                            }
-                                                            FreeVec68K(PowerPCBase, newTask->tp_MessageRIP);
+                                                            PowerPCBase->pp_IdSysTasks += 1;
+                                                            newTask->tp_Id = PowerPCBase->pp_IdSysTasks;
                                                         }
-                                                        FreeVec68K(PowerPCBase, memPort->mp_Semaphore.ssppc_reserved);
+                                                        else
+                                                        {
+                                                            PowerPCBase->pp_IdUsrTasks += 1;
+                                                            newTask->tp_Id = PowerPCBase->pp_IdUsrTasks;
+                                                        }
+
+                                                        newTask->tp_Quantum = PowerPCBase->pp_StdQuantum;
+                                                        newTask->tp_Task.tc_State = TS_READY;
+                                                        /*
+                                                         * tp_Desired IS COMPUTED HERE, NOT LEFT TO CPUStats,
+                                                         * powerpc.p:9329-9337 inside IFNE NEWSCHEDULER:
+                                                         *
+                                                         *     lwz   r7,TASKPPC_NICE(r31)
+                                                         *     addi  r8,r7,NICE_RANGE/2
+                                                         *     slwi  r8,r8,2
+                                                         *     lwz   r7,PPC_NICETAB(r23)
+                                                         *     lwzx  r8,r7,r8
+                                                         *     srwi  r8,r8,8
+                                                         *     liw   r7,PRI_OFFSET*65536
+                                                         *     divwu r0,r7,r8
+                                                         *     stw   r0,TASKPPC_DESIRED(r31)
+                                                         *
+                                                         * which is CPUStats' formula with activity 0, since a
+                                                         * task that has never run has no activity to measure.
+                                                         *
+                                                         * This said "= 0; //CPUStats computes it from the NICE
+                                                         * table" and that mattered as soon as the V14 rule went
+                                                         * in: priDecay declines to judge a task whose tp_Desired
+                                                         * is zero -- it cannot, the quotient would be a division
+                                                         * by zero -- so a new task took NO penalty until the
+                                                         * first CPUStats pass, and a nice +19 task created and
+                                                         * run inside that window was scheduled as nice 0.
+                                                         *
+                                                         * tp_Nice is already clamped to -20..20 above, so the
+                                                         * index is 0..40 and in range. The table is read through
+                                                         * pp_NICETable rather than by calling GetNiceTable: that
+                                                         * lives in the SETUP hunk and this is the FUNCTIONS
+                                                         * hunk, and a direct call between them would land where
+                                                         * the callee used to be.
+                                                         */
+                                                        newTask->tp_Desired = 0;
+
+                                                        if (PowerPCBase->pp_NICETable)
+                                                        {
+                                                            const ULONG* niceTab = (const ULONG*)PowerPCBase->pp_NICETable;
+                                                            ULONG weight = niceTab[(LONG)newTask->tp_Nice + (NICE_RANGE / 2)] >> 8;
+
+                                                            if (weight)
+                                                            {
+                                                                newTask->tp_Desired = (PRI_OFFSET << 16) / weight;
+                                                            }
+                                                        }
+                                                        newTask->tp_Flags |= TASKPPCF_CREATORPPC;
+
+                                                        InsertOnPri(PowerPCBase, (struct List*)&PowerPCBase->pp_ReadyTasks, newTask);
+
+                                                        PowerPCBase->pp_FlagReschedule = -1;
+
+                                                        FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
+
+                                                        myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemSnoopList);
+
+                                                        struct SnoopData* currSnoop = (struct SnoopData*)PowerPCBase->pp_Snoop.mlh_Head;
+                                                        struct SnoopData* nextSnoop;
+
+                                                        while (nextSnoop = (struct SnoopData*)currSnoop->sd_Node.ln_Succ)
+                                                        {
+                                                            if (currSnoop->sd_Type == SNOOP_START)
+                                                            {
+                                                                ULONG (*runSnoop)(__reg("r2") ULONG, __reg("r3") struct TaskPPC*,
+                                                                                  __reg("r4") ULONG, __reg("r5") struct TaskPPC*,
+                                                                                  __reg("r6") ULONG) = currSnoop->sd_Code;
+                                                                ULONG tempR2 = getR2();
+                                                                runSnoop(currSnoop->sd_Data, newTask, myCode, currTask, CREATOR_PPC);
+                                                                storeR2(tempR2);
+                                                            }
+                                                            currSnoop = nextSnoop;
+                                                        }
+
+                                                        myReleaseSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemSnoopList);
+
+                                                        CauseDECInterrupt(PowerPCBase);
+
+                                                        currTask->tp_Flags &= ~TASKPPCF_CHOWN;
+                                                        args.db_Arg[0] = (ULONG)newTask;
+                                                        printDebug(PowerPCBase, (struct DebugArgs*)&args);
+
+                                                        return newTask;
                                                     }
                                                     FreeVec68K(PowerPCBase, memPort);
                                                 }
@@ -788,8 +809,8 @@ PPCFUNCTION VOID myDeleteTaskPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase,
     /*
      * ONE TEARDOWN PER TASK (W3, REVIEW-LIB.md). Kryten (supportppc.c
      * SystemStart) deletes a crashed task its parent may already have
-     * deleted: the second call returns here, before the snoops, the port
-     * and ID_END are done again. The flag is tested and set under
+     * deleted: the second call returns here, before the snoops and ID_END
+     * are done again. The flag is tested and set under
      * pp_SemTaskList, which every DeleteTaskPPC takes. The task list and
      * the count follow tp_TaskPtr below, which the first removal clears --
      * here, or in CommonExcError for a crashed task. 17.13b's Kryten never
@@ -824,11 +845,18 @@ PPCFUNCTION VOID myDeleteTaskPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase,
 
     myReleaseSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemSnoopList);
 
-    if ((PPCtask->tp_Flags & TASKPPCF_CREATORPPC) && (PPCtask->tp_Msgport))
-    {
-        FreeVec68K(PowerPCBase, PPCtask->tp_Msgport->mp_Semaphore.ssppc_reserved);
-        FreeVec68K(PowerPCBase, PPCtask->tp_Msgport);
-    }
+    /*
+     * THE TASK'S PORT IS NOT FREED HERE ANY MORE (T3, REVIEW-LIB.md). The two
+     * FreeVec68K calls that were here are Run68K calls, and each waits for the
+     * 68k's reply on this task's own port: the 68k frees the port, then sends
+     * the ID_DNLL that HandleMsgs queues into it (kernel.c) and myWaitFor68K
+     * reads back from it -- through freed memory. KillTask frees no port at
+     * all, so a task killed by ID_END leaked it. Kryten frees it, with the
+     * rest of the task's memory, once the task is off the CPU (supportppc.c
+     * SystemStart). WarpOS frees it here, on its own heap, with no round trip
+     * (powerpc.p:9489-9497); 17.13b frees it here with the same two waits
+     * (ppcfunctions.p:6395-6411): THIS DIVERGES from both.
+     */
 
     myObtainSemaphorePPC(PowerPCBase, (struct SignalSemaphorePPC*)&PowerPCBase->pp_SemTaskList);
 

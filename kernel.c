@@ -943,6 +943,39 @@ PPCKERNEL void HandleDeferred(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 
 /********************************************************************************************
 *
+*	A TASK THAT IS BEING REMOVED KEEPS ITS STATE (T3, REVIEW-LIB.md). HandleMsgs
+*	wakes the task a frame is for: RUN if it is the running task, READY if not.
+*	DeleteTaskPPC on the running task, and KillTask, set TS_REMOVED, ask for a
+*	decrementer interrupt and spin in TaskHalt; the pass that follows runs
+*	HandleMsgs BEFORE SwitchPPC. A frame for the task handled there (the 68k's
+*	ID_END, an ID_DONE for an async call, an ID_XPPC) turned TS_REMOVED back into
+*	RUN: SwitchPPC, which files a task on pp_RemovedTasks by the state it finds,
+*	then left it running -- a CPU hog off pp_AllTasks that Kryten never frees,
+*	and with TASKATTR_ATOMIC one that keeps the CPU for ever (the R3 rule comes
+*	before the TS_REMOVED test in SwitchPPC). The same overwrite on a task
+*	already on pp_RemovedTasks breaks the test SetTaskPriPPC and SignalPPC make.
+*
+*	WarpOS wakes a task only from TS_WAIT (to READY) and TS_CHANGING (to RUN), so
+*	a removed task is left as it is (powerpc.p:4484-4514, :10804-10828).
+*	HandleDeferred has the test above (TS_REMOVED, "continue"). 17.13b stores the
+*	state without one (setupppc.p:3003-3008, :3109-3115): THIS DIVERGES from it.
+*
+*	A MACRO, NOT A FUNCTION: kernel.c's statics carry no section, and a call
+*	out of the kernel hunk would land where the callee used to be.
+*
+*********************************************************************************************/
+
+#define MSG_SETSTATE(task, state)                                   \
+    do                                                              \
+    {                                                               \
+        if ((task)->tp_Task.tc_State != TS_REMOVED)                 \
+        {                                                           \
+            (task)->tp_Task.tc_State = (state);                     \
+        }                                                           \
+    } while (0)
+
+/********************************************************************************************
+*
 *	This function dispatches new PPC tasks, switches between tasks and redirect signals.
 *
 *********************************************************************************************/
@@ -995,14 +1028,7 @@ PPCKERNEL void HandleMsgs(__reg("r3") struct PrivatePPCBase* PowerPCBase)
                              */
                             myTask->tp_Task.tc_SigAlloc = currMsg->mf_Arg[1];
                         }
-                        if (myTask == PowerPCBase->pp_ThisPPCProc)
-                        {
-                            myTask->tp_Task.tc_State = TS_RUN;
-                        }
-                        else
-                        {
-                            myTask->tp_Task.tc_State = TS_READY;
-                        }
+                        MSG_SETSTATE(myTask, (myTask == PowerPCBase->pp_ThisPPCProc) ? TS_RUN : TS_READY);
                     }
                 }
                 break;
@@ -1048,14 +1074,7 @@ PPCKERNEL void HandleMsgs(__reg("r3") struct PrivatePPCBase* PowerPCBase)
                 AddTailPPC(&myPort->mp_Port.mp_MsgList, (struct Node*)oldMsg);
                 sigTask->tp_Task.tc_SigRecvd |= signal;
 
-                if (sigTask == PowerPCBase->pp_ThisPPCProc)
-                {
-                    sigTask->tp_Task.tc_State = TS_RUN;
-                }
-                else
-                {
-                    sigTask->tp_Task.tc_State = TS_READY;
-                }
+                MSG_SETSTATE(sigTask, (sigTask == PowerPCBase->pp_ThisPPCProc) ? TS_RUN : TS_READY);
                 break;
             }
             case ID_XPPC:
@@ -1085,14 +1104,7 @@ PPCKERNEL void HandleMsgs(__reg("r3") struct PrivatePPCBase* PowerPCBase)
                 AddTailPPC(&myPort->mp_Port.mp_MsgList, xMsg);
                 sigTask->tp_Task.tc_SigRecvd |= signal;
 
-                if (sigTask == PowerPCBase->pp_ThisPPCProc)
-                {
-                    sigTask->tp_Task.tc_State = TS_RUN;
-                }
-                else
-                {
-                    sigTask->tp_Task.tc_State = TS_READY;
-                }
+                MSG_SETSTATE(sigTask, (sigTask == PowerPCBase->pp_ThisPPCProc) ? TS_RUN : TS_READY);
                 break;
             }
             case ID_LLPP:
@@ -1101,7 +1113,7 @@ PPCKERNEL void HandleMsgs(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 
                 if ((myTask) && (myTask->pt_Mirror68K == (struct Task*)currMsg->mf_Arg[0]))
                 {
-                    myTask->pt_Task.tp_Task.tc_State = TS_RUN;
+                    MSG_SETSTATE(&myTask->pt_Task, TS_RUN);
                     myTask->pt_Task.tp_Task.tc_SigRecvd |= currMsg->mf_Signals;
                 }
                 else
@@ -1112,7 +1124,7 @@ PPCKERNEL void HandleMsgs(__reg("r3") struct PrivatePPCBase* PowerPCBase)
                     {
                         if (currTask->pt_Mirror68K == (struct Task*)currMsg->mf_Arg[0])
                         {
-                            currTask->pt_Task.tp_Task.tc_State = TS_READY;
+                            MSG_SETSTATE(&currTask->pt_Task, TS_READY);
                             currTask->pt_Task.tp_Task.tc_SigRecvd |= currMsg->mf_Signals;
                             break;
                         }
