@@ -117,6 +117,56 @@ static ULONG decShorten(struct PrivatePPCBase* PowerPCBase, ULONG decValue)
     return decValue;
 }
 
+/*
+ * T1: AN EXTERNAL INTERRUPT DOES NOT RESTART THE TIME SLICE. Every exception
+ * entry puts pp_Quantum back to pp_StdQuantum, and the exits of the decrementer
+ * and external-interrupt exceptions wrote setDEC(decShorten(pp_Quantum)). For an
+ * external interrupt that switched no task that restarted the whole slice, so
+ * under 68k-to-PPC interrupts faster than a quantum the decrementer never
+ * expired, and what only its arm does never ran: the decrementer handler list,
+ * the pp_ReadyExc and pp_RemovedExc moves that SetExcHandler and RemExcHandler
+ * wait for, and the pp_ExternalInt test that CauseInterrupt waits for. It also
+ * threw away the short decrementers the library arms to get that arm quickly
+ * (CauseDECInterrupt's 30, CauseInterrupt's 50) and a handler's own mtdec.
+ *
+ * NOW: when the task that was running is still running, the decrementer is
+ * written only if the new value is SHORTER than what is left, and one that is
+ * already past zero is left alone: its exception is delayed while MSR[EE] is 0
+ * and comes with the rfi (MPC7410UM.pdf p. 98, p. 281). When a task was switched
+ * the incoming task's slice is written, as before. The minima pp_Quantum
+ * collects stay: the 0x1000 retry for interrupted library code or pp_Mutex or
+ * Forbid, the WaitTime deadlines (TaskCheck), the incoming task's remaining
+ * slice (SwitchPPC) and decShorten's timed handlers.
+ *
+ * THE ORIGINALS. 17.13b restarts the slice here, as this library did: its
+ * external interrupt ends in .SlowReturn, "lwz r0,Quantum(r0) / mtdec r0"
+ * (setupppc.p:3413-3414), or .QuickReturn, 0x1000, for an atomic task or
+ * interrupted library code (:3409-3410, :2768-2780). WarpOS does not: its
+ * external interrupt ends in "mtdec 0" with PPC_SCHEDULE set (powerpc.p:5767-5771,
+ * :5800-5804), and its decrementer handler, finding the flag clear and the
+ * planned time PPC_TBL not reached, only re-arms the remainder (:4416-4432), so
+ * no external interrupt moves the next decrementer out. This gets that without
+ * forcing the decrementer, and DIVERGES from WarpOS in that WarpOS also runs its
+ * decrementer handler list after every external interrupt; from 17.13b rightly.
+ * A flood that SWITCHES a task at every interrupt still writes the incoming
+ * slice each time, at most one quantum. Test: tests/decstarve.
+ */
+static void decAfterExternal(struct PrivatePPCBase* PowerPCBase, struct TaskPPC* taskAtEntry)
+{
+    ULONG want = decShorten(PowerPCBase, PowerPCBase->pp_Quantum);
+
+    if (PowerPCBase->pp_ThisPPCProc == taskAtEntry)
+    {
+        LONG left = (LONG)getDEC();
+
+        if ((left <= 0) || (want >= (ULONG)left))
+        {
+            return;
+        }
+    }
+    setDEC(want);
+}
+
 /********************************************************************************************
 *
 *	Entry point after kernel.s. This directs to the correct exception code.
@@ -184,6 +234,9 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
 {
     PowerPCBase->pp_ExceptionMode = -1;
 
+    /* the task running at entry, so that the exit of an external interrupt can tell whether one was switched in (T1); only the pointer is read */
+    struct TaskPPC* taskAtEntry = PowerPCBase->pp_ThisPPCProc;
+
     /*
      * pp_StdQuantum, NOT the running task's tp_Quantum. Reading
      * pp_ThisPPCProc->tp_Quantum here CRASHED THE LIBRARY DURING INIT: this
@@ -225,7 +278,7 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                     if (readmemLongPPC(PowerPCBase->pp_BridgeMPIC, XMPI_P0IAC) == 0xff)
                     {
                         PowerPCBase->pp_ExceptionMode = 0;
-                        setDEC(decShorten(PowerPCBase, PowerPCBase->pp_Quantum));
+                        decAfterExternal(PowerPCBase, taskAtEntry);     //T1: no switch happened here, so it only shortens
                         return;
                     }
 
@@ -283,7 +336,7 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                     if ((readmemLongPPC(PPC_EUMB_EPICPROC, EPIC_IACK) >> 24) == 0xff)
                     {
                         PowerPCBase->pp_ExceptionMode = 0;
-                        setDEC(decShorten(PowerPCBase, PowerPCBase->pp_Quantum));
+                        decAfterExternal(PowerPCBase, taskAtEntry);     //T1: no switch happened here, so it only shortens
                         return;
                     }
                     struct MsgFrame* msgFrame;
@@ -729,10 +782,19 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
      * traps on every privileged instruction -- and a handler's own DEC write
      * was thrown away: iFUSION's mtdec emulation sets DEC to 100 at 0x01DDAC
      * to be called back. FIXES.md "STAGE 5".
+     *
+     * T1: the external interrupt no longer restarts the slice. A decrementer
+     * exception writes the next slice as ever; an external interrupt that
+     * left the same task running only SHORTENS what is left (decAfterExternal,
+     * above), and writes the incoming task's slice when one was switched in.
      */
-    if ((ExceptionVector == VEC_DECREMENTER) || (ExceptionVector == VEC_EXTERNAL))
+    if (ExceptionVector == VEC_DECREMENTER)
     {
         setDEC(decShorten(PowerPCBase, PowerPCBase->pp_Quantum));
+    }
+    else if (ExceptionVector == VEC_EXTERNAL)
+    {
+        decAfterExternal(PowerPCBase, taskAtEntry);
     }
     return;
 }

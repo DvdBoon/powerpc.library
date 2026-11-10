@@ -769,7 +769,18 @@
 #define PMEP_MIMS               0x34
 #define PMEP_MIIQ               0x40
 #define PMEP_MIOQ               0x44
-#define PMEP_MGIM0              0x2A0
+
+/*
+ * OFFSETS IN THE PMEP GROUP, the 4K PCI window (BAR0) through which the 68k
+ * reaches the Harrier's message passing (pp_BridgeMsgs). The processor sees the
+ * same registers in the XCSR group, at other offsets: MGIM0 is XCSR + $2A0 there
+ * and PMEP + $110 here (Harrier programmer's guide, PDF p. 281, printed 3-107;
+ * the PMEP register map, PDF p. 198, printed 3-24, lists $130-$FFF as reserved).
+ * This was $2A0, the XCSR offset, so CausePPCInterrupt wrote a reserved register
+ * and raised no interrupt. 17.13b has the same $2A0 (68kdefines.i:185,
+ * powerpc.s:4421-4422); WarpOS has no Harrier. REVIEW-LIB.md E8.
+ */
+#define PMEP_MGIM0              0x110
 
 #define PCIMEM_4K               0x00F0FFFF
 #define PCIMEM_256KB            0x0000FCFF

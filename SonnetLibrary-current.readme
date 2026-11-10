@@ -421,6 +421,14 @@ What has changed since 17.15:
   stayed on; fixed. The NICE table was reached through the address the setup
   code had been started from, which on a Harrier is a boot-time alias in the
   high vector area; it now sits in the library's own memory, as in 17.13b.
+- CausePPCInterrupt() from a 68k program did nothing on a Harrier: it wrote the
+  message register at the offset the PowerPC sees it at, not the one the PCI bus
+  does, so no interrupt reached the PPC. It now raises the interrupt for the
+  EXCF_INTERRUPT handlers. An external interrupt used to start the whole time
+  slice again, so with the 68k sending interrupts faster than the slice the
+  decrementer never ran out; it now only shortens what is left when the same
+  task keeps running. The Harrier set-up counted 983,299 interrupt
+  acknowledgements at every start where 15 are meant; it counts 15.
 
 What has changed since 17.14:
 

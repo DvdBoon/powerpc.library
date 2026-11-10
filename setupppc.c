@@ -573,7 +573,18 @@ void setupOpenPIC(__reg("r3") struct InitData* initData)
     writememLongPPC(initData->id_MPICBase, XMPI_IFEDE, XMPI_IFEDE_P0);
     writememLongPPC(initData->id_MPICBase, XMPI_P0CTP, 0);
 
-    value = readmemLongPPC(initData->id_MPICBase, XMPI_FREP);
+    /*
+     * S5: THE COUNT IS NIRQ, NOT THE WHOLE REGISTER. FREP is NIRQ (bits 27:16, the
+     * highest external IRQ source supported), NCPU and VID (Harrier manual
+     * p. 3-114: reset $00F, $01 and $03, so 0x000F0103). Counting down the word
+     * itself made 983,299 uncached acknowledge and end-of-interrupt pairs here,
+     * with the MMU and the caches still off (setupFIFOs and this run before
+     * mmuSetup and setupCaches), instead of 15. 17.13b takes the field and
+     * loops on it ("rlwinm r28,r27,16,20,31", setupppc.p:1051-1061); setupEPIC
+     * below does the same for the MPC107's. WarpOS has no counterpart: it has no
+     * OpenPIC code. tests/frep reads FREP back.
+     */
+    value = (readmemLongPPC(initData->id_MPICBase, XMPI_FREP) >> 16) & 0xfff;
 
     while (value)
     {
