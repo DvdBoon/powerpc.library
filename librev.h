@@ -43,7 +43,7 @@
 #elif defined(G4_EARLY_VEC)
 #define VSTRING "$VER: powerpc.library 17.16 (29.10.26) G4 early VEC test\r\n"
 #else
-#define VSTRING "$VER: powerpc.library 17.16 (31.10.26)\r\n"
+#define VSTRING "$VER: powerpc.library 17.16 (10.11.26)\r\n"
 #endif
 
 #define VERPCI      13

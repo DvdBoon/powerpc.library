@@ -370,17 +370,27 @@ void commonRemTask(__reg("a1") struct Task* myTask, __reg("d0") ULONG flag, __re
 
 /********************************************************************************************/
 
-PATCH68K void SysExitCode(void)
+/*
+ * P2 (REVIEW-LIB.md, 10 Nov 2026): THE CLEANUP OF SysExitCode.
+ *
+ * patchAddTask gives every process whose own final PC lies in ROM (a zero high
+ * byte) the routine SysExitCode, in functions68k.s, so that the process's PPC
+ * mirror is removed before the original runs. dos's exit routine takes the
+ * process's return code in d0 and expects the stack as the process's last rts
+ * left it. This used to be one C function: it set d0 to 0 for commonRemTask,
+ * which left d0 as it liked (still 0, unless a mirror was freed), and entered
+ * the original with jsr, which put a return address and three saved registers
+ * (16 bytes) on the stack. Now SysExitCode saves d0-a6, calls this routine,
+ * restores d0-a6 and enters the original by push and rts, as 17.13b's
+ * ExitCode2 does (powerpc.s:3106-3111). WarpOS has no counterpart: its AddTask
+ * patch only supplies a termination routine for a NULL final PC
+ * (powerpc.s:4996-5012). tests/patches68k.c.
+ */
+PATCH68K void SysExitHelper(void)
 {
-    struct Task* myTask;
-    void (*RemSysTask_ptr)() = RemSysTask;
-
     struct ExecBase* SysBase = myPPCBase->PPC_SysLib;
-    myTask = SysBase->ThisTask;
 
-    commonRemTask(myTask, 0, SysBase);
-
-    RemSysTask_ptr();
+    commonRemTask(SysBase->ThisTask, 0, SysBase);
 
     return;
 }
@@ -430,16 +440,37 @@ PATCH68K APTR patchAddTask(__reg("a1") struct Task* myTask, __reg("a2") APTR ini
 *
 *********************************************************************************************/
 
+/*
+ * P1 (REVIEW-LIB.md, 10 Nov 2026): this is 17.13b's NewAlloc again
+ * (powerpc.s:3251-3340), less its A1200 patches (TB_WARN), which the library
+ * does not install. The port to C had lost four things:
+ *
+ *  - the filter let every request through that had FAST in it, whatever else it
+ *    asked for (powerpc.s:3252-3260, "If FAST requested, redirect"); here a
+ *    request without PUBLIC returned at once, so a task that asked for
+ *    MEMF_FAST alone never got PPC memory;
+ *  - a task with no name made the walk read at 0xFFFFFFFB (a NULL pointer, then
+ *    -5); 17.13b exits there (powerpc.s:3288-3289). Here a task with no name
+ *    skips the name tests and keeps the tagging test at the end, as a CLI
+ *    process with no command name always did;
+ *  - the walk stopped ON the NUL, so the four bytes compared were the ones
+ *    before the last character, for every task that is not a CLI process;
+ *    17.13b steps past the NUL and reads at -5, the last four
+ *    (powerpc.s:3292-3294). A name under four characters is not compared
+ *    (17.13b would read before the string);
+ *  - the AmigaAMP routine, for a name ending in "aAMP" (powerpc.s:3232-3249 and
+ *    :3297-3298).
+ *
+ * WarpOS has no AllocMem patch. tests/patches68k.c.
+ */
 PATCH68K APTR patchAllocMem(__reg("d0") ULONG byteSize, __reg("d1") ULONG attributes,
                    __reg("a6") struct ExecBase* SysBase)
 {
     APTR (*AllocMem_ptr)(__reg("d0") ULONG, __reg("d1") ULONG, __reg("a6") struct ExecBase*) = OldAllocMem;
 
-                    //AmigaAMP
-
     USHORT testAttr = (USHORT)attributes;
 
-    if (testAttr)
+    if (testAttr && !(testAttr & MEMF_FAST))
     {
         if ( (testAttr & MEMF_CHIP) || !(testAttr & MEMF_PUBLIC))
         {
@@ -449,6 +480,7 @@ PATCH68K APTR patchAllocMem(__reg("d0") ULONG byteSize, __reg("d1") ULONG attrib
 
     struct Task* myTask = SysBase->ThisTask;
     char * myName = NULL;
+    ULONG nameLen = 0;
 
     ULONG highTaskByte = (ULONG)(myTask) & 0xf0000000;
 
@@ -467,12 +499,23 @@ PATCH68K APTR patchAllocMem(__reg("d0") ULONG byteSize, __reg("d1") ULONG attrib
 
     if ((myTask->tc_Node.ln_Type != NT_PROCESS) || ((myTask->tc_Node.ln_Type == NT_PROCESS) && ((myProcess->pr_CLI == NULL))))
     {
-        myName = myTask->tc_Node.ln_Name;
-        while (myName[0] != 0)
+        char* nameStart = myTask->tc_Node.ln_Name;
+
+        if (nameStart)
         {
-            myName ++;
+            char* nameEnd = nameStart;
+
+            while (nameEnd[0] != 0)
+            {
+                nameEnd ++;
+            }
+            nameLen = nameEnd - nameStart;
+
+            if (nameLen >= 4)
+            {
+                myName = nameEnd - 4;
+            }
         }
-        myName -= 5;
     }
     else
     {
@@ -483,6 +526,7 @@ PATCH68K APTR patchAllocMem(__reg("d0") ULONG byteSize, __reg("d1") ULONG attrib
             if (myName = (char *)(ULONG)(myCLI->cli_CommandName << 2))
             {
                 UBYTE offset = myName[0] - 3;
+                nameLen = (UBYTE)myName[0];
                 if (!(offset & 0x80))
                 {
                     myName += offset;
@@ -496,16 +540,35 @@ PATCH68K APTR patchAllocMem(__reg("d0") ULONG byteSize, __reg("d1") ULONG attrib
 
     if (myName)
     {
+        ULONG lastFour = *((ULONG*)myName);
+
         while (testValue = *((ULONG*)testlongs + longnum))
         {
-            if (testValue == *((ULONG*)myName))
+            if (testValue == lastFour)
             {
                 attributes |= MEMF_PPC;
                 return ((*AllocMem_ptr)(byteSize, attributes, SysBase));
             }
         longnum += 1;
         }
-        if ((*((LONG*)myName) == 0x70656564) || ((*((ULONG*)myName) == 0x2e657865) && (*((ULONG*)myName - 1) == 0x70616365)))
+
+        if (lastFour == 0x61414D50)                 //"aAMP", AmigaAMP (powerpc.s:3232-3249, :3297-3298)
+        {
+            if (!(myTask->tc_Flags & TF_PPC))       //a task tagged by this library goes to PPC memory
+            {
+                if ((byteSize != 0xC094) && (byteSize != 0x904) && (byteSize != 0x4D4))     //the sizes of AmigaAMP v3's buffers
+                {
+                    if (((LONG)byteSize < 0x4000) || ((byteSize & 0xFF) != 0x54))           //AmigaAMP v2's lazy patch: 0x4000 or more, ending in 0x54
+                    {
+                        return ((*AllocMem_ptr)(byteSize, attributes, SysBase));
+                    }
+                }
+            }
+            attributes |= MEMF_PPC;
+            return ((*AllocMem_ptr)(byteSize, attributes, SysBase));
+        }
+
+        if ((lastFour == 0x70656564) || ((lastFour == 0x2e657865) && (nameLen >= 8) && (*((ULONG*)myName - 1) == 0x70616365)))
         {
             return ((*AllocMem_ptr)(byteSize, attributes, SysBase));
         }
@@ -643,15 +706,24 @@ BPTR myLoader(STRPTR name) // -1 = try normal 0 = fail
                     myFuncTable.FreeFunc  = (APTR)&FreeFunc;
                     myFuncTable.Stack     = 0;
                     mySeglist = InternalLoadSeg(myLock, NULL, (LONG*)&myFuncTable, (LONG*)&myFuncTable.Stack);
-                    Close(myLock);
                     if (mySeglist < 0)
                     {
-                        UnLoadSeg(!mySeglist);
+                        /*
+                         * AN OVERLAID FILE (P4, REVIEW-LIB.md, 10 Nov 2026).
+                         * InternalLoadSeg returns -(seglist) and keeps the file
+                         * open for the overlay manager; unloading the seglist is
+                         * what closes it (NDK 3.9 dos.doc:2803-2804, :2845-2846,
+                         * :5423-5424). So no Close here, and it is the seglist
+                         * that is unloaded, not !mySeglist (which is 0), as in
+                         * 17.13b (powerpc.s:3414-3416, :3469).
+                         */
+                        UnLoadSeg(-mySeglist);
                         SetProtection(name, myProt | 0x20000);
                         SysBase->ThisTask->tc_Flags &= ~TF_PPC;
                         return -1;
-                     }
-                    else if (!(mySeglist))
+                    }
+                    Close(myLock);
+                    if (!(mySeglist))
                     {
                         return NULL;
                     }
@@ -696,7 +768,7 @@ BPTR myLoader(STRPTR name) // -1 = try normal 0 = fail
                                 {
                                     if (mySegData[i] == ppclib[i])
                                     {
-                                        if (powerlib[i+1] == 0)
+                                        if (ppclib[i+1] == 0)
                                         {
                                             SetProtection(name, myProt | 0x10000);
                                             return mySeglist;
@@ -711,7 +783,7 @@ BPTR myLoader(STRPTR name) // -1 = try normal 0 = fail
                                 {
                                     if (mySegData[i] == ampname[i])
                                     {
-                                        if (ampname[+1] == 0)
+                                        if (ampname[i+1] == 0)
                                         {
                                             SetProtection(name, myProt | 0x10000);
                                             return mySeglist;
@@ -731,6 +803,17 @@ BPTR myLoader(STRPTR name) // -1 = try normal 0 = fail
                     }
                 }
             }
+            else
+            {
+                /* ExamineFH failed (a handler that cannot examine a handle): free the FIB and the handle (P4) */
+                FreeDosObject(DOS_FIB, (APTR)myFIB);
+                Close(myLock);
+            }
+        }
+        else
+        {
+            /* AllocDosObject failed: 17.13b closes the handle here too (powerpc.s:3369, :3406) (P4) */
+            Close(myLock);
         }
     }
     return -1;

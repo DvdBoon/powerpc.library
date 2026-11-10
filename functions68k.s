@@ -32,7 +32,8 @@ FUNC_CNT	SET	   FUNC_CNT-6  * Standard offset-6 bytes each
             include powerpc/powerpc.i
 
             XREF _ChangeStackRamLib, _Run68KCode, _myRunPPC, _MyCopy, _GetClock
-            XDEF _myCRunPPC
+            XREF _SysExitHelper, _RemSysTask
+            XDEF _myCRunPPC, _SysExitCode
 
 ;********************************************************************************************
 
@@ -43,6 +44,24 @@ _MyCopy     move.l (a0)+,(a1)+
 _GetClock   move.b $bfe701,2(a0)
             move.b $bfe601,3(a0)
             move.w #0,0(a0)
+            rts
+
+;********************************************************************************************
+;
+; The final PC of a process whose own lies in ROM (patchAddTask puts this routine there; the
+; original is kept in RemSysTask). dos's exit routine takes the process's return code in d0 and
+; expects the stack as the process's last rts left it, so every register is saved around the C
+; cleanup, which clobbers d0 and leaves its own frame on the stack, and the original is entered
+; by push and rts. This is 17.13b's ExitCode2 (powerpc.s:3106-3111); it was a C function that
+; called the original with jsr, so dos got d0 = 0 and 16 extra bytes (REVIEW-LIB.md P2).
+;
+;********************************************************************************************
+
+_SysExitCode
+            movem.l d0-a6,-(a7)
+            jsr _SysExitHelper
+            movem.l (a7)+,d0-a6
+            move.l _RemSysTask,-(a7)
             rts
 
 ;********************************************************************************************

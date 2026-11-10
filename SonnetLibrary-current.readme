@@ -395,6 +395,17 @@ What has changed since 17.15:
   message you give is sent to its reply port once the task has been removed,
   which can take a few seconds. About 1 KB of every task made with
   CreateTaskPPC was never given back; it is now.
+- Every process whose exit routine lay in ROM was given a replacement that
+  handed dos a return code of 0 and left 16 bytes on the stack; it now passes
+  the code on and leaves the stack as it was, as in 17.13b. The patch on
+  AllocMem() had come apart from 17.13b's: it read from address 0xFFFFFFFB
+  for a task without a name, compared the wrong four characters of the name
+  of a task that is not a CLI process (so _PPC, _68K, 2005, sk_0 and sk_1
+  were missed), turned away a request for MEMF_FAST alone, and had lost the
+  AmigaAMP case. All are as in 17.13b again. The loader did not recognise
+  ppc.library or AmigaAMP in a program, lost the memory of an overlaid
+  program it had loaded, and lost a file handle (and a FIB) when the file
+  could not be examined; fixed.
 
 What has changed since 17.14:
 

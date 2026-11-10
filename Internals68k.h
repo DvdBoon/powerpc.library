@@ -63,6 +63,8 @@ PATCH68K APTR   patchAllocMem  (__reg("d0") ULONG byteSize, __reg("d1") ULONG at
 PATCH68K APTR   patchAddTask   (__reg("a1") struct Task* myTask, __reg("a2") APTR initialPC,
                        __reg("a3") APTR finalPC, __reg("a6") struct ExecBase* SysBase);
 PATCH68K void   patchRemTask   (__reg("a1") struct Task* myTask, __reg("a6") struct ExecBase* SysBase);
+void            SysExitCode    (void);   //functions68k.s: the final PC given to a process whose own is in ROM (P2)
+PATCH68K void   SysExitHelper  (void);   //its cleanup, called with every register saved
 
 void DPutChProc(__reg("d0") UBYTE mychar, __reg("a3") APTR PutChData);
 
