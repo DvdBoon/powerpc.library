@@ -209,7 +209,9 @@ xBack       move.l a6,-(a7)
             movem.l d0-a5,-(a6)
             move.l a6,a0
             move.l (a7)+,a6
-            move.l a6,PP_REGS+56(a0)
+            move.l a6,56(a0)            ;a6 was decremented to the start of the block, and a0 is that: the a6 slot is 56 from it
+                                        ;(PP_REGS+56 counted PP_REGS twice and wrote PP_FRegs[2]; REVIEW-LIB.md M5, 17.13b
+                                        ;powerpc.s:4032-4051, WarpOS powerpc.s:4242-4249)
 
             move.l TempSysB(pc),a6
             move.l (a7)+,a3

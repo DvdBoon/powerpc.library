@@ -406,6 +406,14 @@ What has changed since 17.15:
   ppc.library or AmigaAMP in a program, lost the memory of an overlaid
   program it had loaded, and lost a file handle (and a FIB) when the file
   could not be examined; fixed.
+- WaitForPPC() raised a negative priority of the calling program to 0, for
+  good; the program now keeps the priority it set, as under WarpOS (17.13b
+  lowered a priority of 0 or more to 0 instead). A signal that was pending
+  when a program called RunPPC() was sent to the PPC task, but also stayed
+  with the program and was sent a second time; it is now sent once. When a
+  68k function called with Run68K() returned, its a6 was stored in the wrong
+  place: the PPC program found its own a6 in PP_Regs[14], and on a 68k without
+  a 68040/68060 FPU the upper half of PP_FRegs[2] was overwritten. Fixed.
 
 What has changed since 17.14:
 

@@ -343,7 +343,21 @@ LIBFUNC68K LONG myCRunPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __reg(
     myFrame->mf_Message.mn_ReplyPort    = myMirror->mt_Port;
     myFrame->mf_MirrorPort              = myMirror->mt_Port;
     myFrame->mf_PPCTask                 = myMirror->mt_PPCTask;
-    myFrame->mf_Signals                 = (thisTask->tc_SigRecvd & 0xfffff000) & ~(1 << (ULONG)myMirror->mt_Port->mp_SigBit);
+    /*
+     * THE SIGNALS SENT ARE TAKEN OFF THIS TASK -- M4 (REVIEW-LIB.md, 10 Nov 2026).
+     * mf_Signals was built from tc_SigRecvd and left there, so the first Wait in
+     * myWaitForPPC returned the same bits at once and sent them again as ID_LLPP:
+     * a signal pending when RunPPC was called reached the PPC twice. 17.13b clears
+     * what it sends (powerpc.s:3744-3747: bclr, and, eor); WarpOS does it under
+     * Forbid (powerpc.s:3969-3980, and after a 68k job :4131-4142), and so does
+     * this library's PPC side for Run68K (functionsppc.c:96-97). exec's SetSignal
+     * fetches and clears in one step, as the DONE frame in myWaitForPPC already
+     * does (item 20); 17.13b's xor is not atomic. The mirror's own port bit is
+     * left alone. tests/runppc68k.c.
+     */
+    ULONG sendMask = 0xfffff000UL & ~(1UL << (ULONG)myMirror->mt_Port->mp_SigBit);
+
+    myFrame->mf_Signals                 = SetSignal(0L, sendMask) & sendMask;
     myFrame->mf_Arg[0]                  = (ULONG)newPPCTask;
     myFrame->mf_Arg[1]                  = thisTask->tc_SigAlloc;
     myFrame->mf_Arg[2]                  = (ULONG)thisTask;
@@ -424,10 +438,20 @@ LIBFUNC68K LONG myWaitForPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __r
             {
                 while (1)
                 {
-                    if (thisTask->tc_Node.ln_Pri < 0)
-                    {
-                        thisTask->tc_Node.ln_Pri = 0;
-                    }
+                    /*
+                     * NO PRIORITY KLUDGE HERE -- P3 (REVIEW-LIB.md, 10 Nov 2026; the
+                     * user's option B). This raised a negative priority to 0, for good,
+                     * on every pass. 17.13b does the opposite: it lowers a priority of
+                     * 0 or more to 0, "to prevent high pri stuff blocking the system
+                     * like Heretic II", and leaves a negative one alone
+                     * (powerpc.s:3851-3856). WarpOS has no such thing: its Wait_PPC runs
+                     * the PPC's 68k calls on the caller's process at the caller's own
+                     * priority (powerpc.s:4019-4167), and since V14 the PPC side ignores
+                     * task priorities (WarpUP History.txt:469-471, "Use the NICE
+                     * values"; here prirule.h). So a program keeps the priority it set.
+                     * Should a game ever block the system through this, 17.13b's test
+                     * is "if (pri >= 0) pri = 0". tests/runppc68k.c.
+                     */
 
                     /*  Only wait when the port is empty -- see the long note
                     **  in support68k.c's copy of this loop. Wait has already
