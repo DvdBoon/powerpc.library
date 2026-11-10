@@ -354,6 +354,20 @@ struct PPCBase *mymakeLibrary(struct InternalConsts *myConsts, ULONG funPointer)
      */
     ((struct PrivatePPCBase*)PowerPCBase)->pp_SuperLocation = (ULONG)SuperLocation + funOffset;
 
+    /*
+     * THE NICE TABLE, IN THE COPY THE PPC READS (S3). It is a table of 41
+     * longwords in supportppc.s's functions section, so it moved by funOffset
+     * with the code, exactly as SuperLocation. setupppc.c used to store the
+     * address of its own copy in the SETUP hunk: the address that hunk runs at,
+     * which on a Harrier is the high alias (MSR[IP] is set at reset, ENRV maps
+     * RAM at 0xFFF00000 and the reset branch is relative), 0xFFF13404, and it
+     * stayed that after IP was cleared. User code reads the alias only through
+     * the vector window's PTE (setupppc.c:238). 17.13b keeps the table in its
+     * functions section and stores the pointer at set-up (ppcfunctions.p:472-483,
+     * setupppc.p:580-581); WarpOS stores PPC_NICETAB at init (powerpc.p:911-912).
+     */
+    ((struct PrivatePPCBase*)PowerPCBase)->pp_NICETable = (ULONG)NiceTable + funOffset;
+
     CacheClearU();
 
     InitStruct(&LibInitData[0], PowerPCBase, 0);

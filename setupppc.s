@@ -361,6 +361,15 @@ _VecEntry:
 # section, which is why _GetExcTable and _GetVecEntry live here beside their
 # caller.
 #
+# S3: THIS COPY IS NO LONGER THE ONE USED. pp_NICETable held the address this hunk
+# RUNS at, and on a Harrier that is the high alias 0xFFF13000 (MSR[IP] is set at
+# reset, ENRV maps RAM at 0xFFF00000, the reset branch is relative): 0xFFF13404,
+# which stayed that after IP was cleared and which user code reads only through
+# the vector window's PTE. supportppc.s now carries the same 41 values as the
+# label _NiceTable, in the functions hunk, and libinit.c stores its address in
+# pp_NICETable, which setupppc.c no longer overwrites. Nothing calls GetNiceTable
+# now; it stays, with this copy, until the reverse engineering is done.
+#
 #********************************************************************************************
 
 _GetNiceTable:

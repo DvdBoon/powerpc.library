@@ -1172,13 +1172,21 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
     }
 
     /*
-     * The NICE weighting table, FIXES.md item 18. It lives in supportppc.s --
-     * see GetNiceTable there for the values and why it cannot be a C array:
-     * under -sc a C table is addressed through the small-data area and this
-     * library has no _SDA_BASE_. pp_NICETable had no mentions at all in
-     * lib/*.c before this.
+     * The NICE weighting table, FIXES.md item 18, is NOT pointed at from here
+     * any more (S3). This stored GetNiceTable()'s result, the address of the
+     * copy in setupppc.s -- in the SETUP hunk, by the address that hunk RUNS
+     * at: on a Harrier the high alias 0xFFF13000 (MSR[IP] is set at reset,
+     * ENRV maps RAM at 0xFFF00000, the reset branch is relative), so
+     * 0xFFF13404, and the pointer stayed there after mmuSetup cleared IP. User
+     * code reads it only through the vector window's PTE (:238).
+     * mymakeLibrary (libinit.c) now stores the address of supportppc.s's
+     * NiceTable in the functions hunk, which is the library's own RAM, and it
+     * does so before this runs; storing here would have put the setup copy
+     * back. GetNiceTable and its copy stay in setupppc.s unused. The values:
+     * setupppc.s says why they are in assembler -- under -sc a C table is
+     * addressed through the small-data area and this library has no
+     * _SDA_BASE_.
      */
-    PowerPCBase->pp_NICETable = (ULONG)GetNiceTable();
 
     /*
      * THE RUNNING MINIMUM STARTS AT ZERO, and this line used to set it to

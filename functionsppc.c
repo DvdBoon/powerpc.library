@@ -702,10 +702,12 @@ PPCFUNCTION struct TaskPPC* myCreateTaskPPC(__reg("r3") struct PrivatePPCBase* P
                                                          *
                                                          * tp_Nice is already clamped to -20..20 above, so the
                                                          * index is 0..40 and in range. The table is read through
-                                                         * pp_NICETable rather than by calling GetNiceTable: that
-                                                         * lives in the SETUP hunk and this is the FUNCTIONS
-                                                         * hunk, and a direct call between them would land where
-                                                         * the callee used to be.
+                                                         * pp_NICETable. It is in this FUNCTIONS hunk (supportppc.s
+                                                         * NiceTable, S3) and C cannot name a data label there;
+                                                         * it used to be GetNiceTable's copy in the SETUP hunk, by
+                                                         * the address that hunk ran at, a Harrier's high alias
+                                                         * 0xFFF13404, which this task read only through the
+                                                         * vector window's PTE. tests/nicetable.
                                                          */
                                                         newTask->tp_Desired = 0;
 
@@ -2374,8 +2376,16 @@ PPCFUNCTION ULONG mySetHardware(__reg("r3") struct PrivatePPCBase* PowerPCBase, 
     }
     else if (flags == HW_BRANCHTRACEOFF)
     {
+        /*
+         * E3: THE BRANCH-TRACE BIT, PSL_BE. This cleared PSL_SE, the single-step
+         * bit, so after HW_BRANCHTRACEON the branch trace stayed on and a
+         * single-step the caller had set went off. 17.13b's .BranchOff
+         * (ppcfunctions.p:6581-6593: ori / xori PSL_BE) and WarpOS's
+         * DisableBranchTrace_S (hal/warp.p:1143-1150: ori / xori $0200) both
+         * clear BE. Test: tests/branchtrace.
+         */
         ULONG key = mySuper(PowerPCBase);
-        setMSR(getMSR() & ~PSL_SE);
+        setMSR(getMSR() & ~PSL_BE);
         myUser(PowerPCBase, key);
     }
     else if (flags == HW_FPEXCON)
@@ -4806,17 +4816,38 @@ PPCFUNCTION VOID myNewListPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
 
 PPCFUNCTION VOID myCauseInterrupt(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 {
+    /*
+     * E5: THE EXTERNAL-INTERRUPT HANDLERS RUN, AND THIS WAITS FOR THEM. It armed
+     * the decrementer and spun on pp_ExceptionMode, but nothing on the
+     * decrementer's path ran the EXCF_INTERRUPT list: only the external arms in
+     * kernel.c did, so a handler set with EXCF_INTERRUPT never saw
+     * CauseInterrupt, and the spin ended on whichever exception left first.
+     * Now it sets pp_ExternalInt and spins on that; kernel.c's decrementer arm
+     * clears it after running the list, as
+     * - WarpOS, whose CauseInterrupt sets PPC_INTFLAG, calls SetTimer(0) and
+     *   waits for the flag (powerpc.p:13958-13976), and whose decrementer
+     *   handler tests it after the decrementer list (:3949-3962) and runs
+     *   Exception5, EXCF_INTERRUPT and PPC_EXC_INTERRUPT (:6136-6168);
+     * - 17.13b, which sets sonnet_ExternalInt and mtdec 10 when not already in
+     *   an exception (ppcfunctions.p:6167-6193), and whose decrementer vector
+     *   tests it (setupppc.p:4265-4267) and takes .EHandler (:2528-2533). It
+     *   does not wait, and WarpOS does: the autodoc promises "all interrupt
+     *   handlers are guaranteed to be executed before this function is left"
+     *   (WarpUP-WarpOS/Docs/powerpc.guide:1260-1261), so this waits.
+     * From an exception handler it still does nothing, as 17.13b. Test:
+     * tests/causeint.
+     */
     if (!(PowerPCBase->pp_ExceptionMode))
     {
         ULONG key = mySuper(PowerPCBase);
 
-        PowerPCBase->pp_ExceptionMode = -1;
+        PowerPCBase->pp_ExternalInt = -1;
 
 		setDEC(50);
 
         myUser(PowerPCBase, key);
 
-        while (PowerPCBase->pp_ExceptionMode);
+        while (PowerPCBase->pp_ExternalInt);
     }
     return;
 }

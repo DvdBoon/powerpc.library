@@ -333,6 +333,29 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
         {
             CommonExcHandler(PowerPCBase, iframe, (struct List*)&PowerPCBase->pp_ExcDecrementer);
 
+            /*
+             * CauseInterrupt (E5): THE EXCF_INTERRUPT HANDLERS, AFTER THE
+             * DECREMENTER LIST. Only the external arms above ran
+             * pp_ExcInterrupt, so a handler set with EXCF_INTERRUPT was never
+             * called for CauseInterrupt, which arms this decrementer. The flag is
+             * cleared before the list runs, as WarpOS (powerpc.p:3949-3962) and
+             * 17.13b (setupppc.p:2528-2533), and the handlers see the exception
+             * ID they asked for: CommonExcHandler matches them by
+             * "ed_ExcID & ec_ExcID" (below) and _SmallExcHandler hands the
+             * handler that ID, so it is EXCF_INTERRUPT for the call and the
+             * decrementer's again after it. WarpOS runs the same list from
+             * Exception5 with XC_EXCID = EXCF_INTERRUPT (powerpc.p:6136-6168).
+             * CommonExcError returns for both IDs, so a list nobody is on adds
+             * no error window. CauseInterrupt waits for the flag.
+             */
+            if (PowerPCBase->pp_ExternalInt)
+            {
+                PowerPCBase->pp_ExternalInt = 0;
+                iframe->if_Context.ec_ExcID = EXCF_INTERRUPT;
+                CommonExcHandler(PowerPCBase, iframe, (struct List*)&PowerPCBase->pp_ExcInterrupt);
+                iframe->if_Context.ec_ExcID = EXCF_DECREMENTER;
+            }
+
             struct ExcData* eData;
 
             while (eData = (struct ExcData*)RemHeadPPC((struct List*)&PowerPCBase->pp_ReadyExc))

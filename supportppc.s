@@ -24,7 +24,7 @@
 
 .global     _LockMutexPPC, _FreeMutexPPC, _CopyMemQuickPPC, _SwapStack, _SetFPExc
 .global     _FinalCalc, _Calculator, _FPE_Enable, _FPE_Disable, _RunCPP, _GetDecTable
-.global     _CopyMemQuickVMX, _SuperTrap, _SuperLocation
+.global     _CopyMemQuickVMX, _SuperTrap, _SuperLocation, _NiceTable
 
 #********************************************************************************************
 
@@ -389,6 +389,38 @@ _GetDecTable:
        mflr      r3
        mtlr      r4
        blr
+
+#********************************************************************************************
+#
+#    NiceTable: THE NICE WEIGHTING TABLE (S3), the values of setupppc.s's GetNiceTable and
+#    the original's NICETab (powerpc.p:17948; 17.13b's Nice_Table, ppcfunctions.p:472-483):
+#    41 longwords for nice -20..+20, entry[i] = round(2^(i*6/40) * 2^24). It is a LABEL,
+#    not a function, and it sits in THIS section on purpose. GetNiceTable's copy is in the
+#    setup hunk, and pp_NICETable held the address that function returned: the address the
+#    setup hunk RUNS at. On a Harrier that is the high alias 0xFFF13000 (MSR[IP] is set at
+#    reset, ENRV maps RAM at 0xFFF00000 and the reset branch is relative), so the pointer
+#    was 0xFFF13404 and stayed there after setup cleared IP: a boot-time alias that user
+#    code reads only through the vector window's PTE. Here it is in the library's own PPC
+#    RAM, which is where both originals have it.
+#
+#    The 68k side takes its ADDRESS, as it does SuperLocation's, and mymakeLibrary stores
+#    that plus funOffset in pp_NICETable (libinit.c). Nothing branches to it. 17.13b keeps
+#    it in the functions section and stores the pointer at set-up (ppcfunctions.p:472-483,
+#    setupppc.p:580-581); WarpOS keeps NICETab in its code and stores PPC_NICETAB at init
+#    (powerpc.p:911-912). Test: tests/nicetable.
+#
+#********************************************************************************************
+
+_NiceTable:
+        .long   16777216,18615487,20655176,22918352,25429504
+        .long   28215802,31307392,34737726,38543921,42767158
+        .long   47453133,52652548,58421659,64822890,71925500
+        .long   79806339,88550677,98253128,109018671,120963790
+        .long   134217728,148923894,165241406,183346820,203436034
+        .long   225726413,250459137,277901812,308351367,342137263
+        .long   379625063,421220380,467373275,518583118,575403996
+        .long   638450708,708405415,786025023,872149370,967710316
+        .long   1073741824
 
 #********************************************************************************************
 #

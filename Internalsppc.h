@@ -428,6 +428,8 @@ ULONG* GetNiceTable(VOID);
 ULONG SuperTrap(VOID);                  /* supportppc.s: Super()'s trap, warp.p:803-807 */
 VOID  SuperLocation(VOID);              /* supportppc.s: the trapping mfpvr; kernel.c compares
                                          * SRR0 with its ADDRESS -- never called */
+VOID  NiceTable(VOID);                  /* supportppc.s: the NICE weighting table, 41 longwords --
+                                         * a data label, only its ADDRESS is taken (libinit.c) */
 ULONG* getTableFX(VOID);
 ULONG* getTable100(VOID);
 ULONG* getTable66(VOID);

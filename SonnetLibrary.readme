@@ -421,6 +421,13 @@ What has changed since 17.15:
   68k function called with Run68K() returned, its a6 was stored in the wrong
   place: the PPC program found its own a6 in PP_Regs[14], and on a 68k without
   a 68040/68060 FPU the upper half of PP_FRegs[2] was overwritten. Fixed.
+- CauseInterrupt() only armed the decrementer, so the exception handlers set
+  for EXCF_INTERRUPT ran only for a real external interrupt. It now runs them
+  before it returns, as under WarpOS. SetHardware(HW_BRANCHTRACEOFF) switched
+  off the single-step bit instead of the branch trace bit, so the branch trace
+  stayed on; fixed. The NICE table was reached through the address the setup
+  code had been started from, which on a Harrier is a boot-time alias in the
+  high vector area; it now sits in the library's own memory, as in 17.13b.
 
 What has changed since 17.14:
 

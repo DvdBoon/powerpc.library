@@ -282,7 +282,14 @@ UBYTE                       pp_FlagForbid;
 UBYTE                       pp_FlagWait;
 UBYTE                       pp_FlagPortInUse;  //for nt_IntPort....not used
 UBYTE                       pp_BusyCounter;
-UBYTE                       pp_BytePad[2];
+/*
+ * pp_ExternalInt (E5): set by CauseInterrupt, tested and cleared by the
+ * decrementer arm in kernel.c, which then runs the EXCF_INTERRUPT handlers.
+ * It is 17.13b's sonnet_ExternalInt and WarpOS's PPC_INTFLAG. It takes one of
+ * the two pad bytes that were here, so every field after it keeps its offset.
+ */
+volatile UBYTE              pp_ExternalInt;
+UBYTE                       pp_BytePad;
 ULONG                       pp_NumAllTasks;
 ULONG                       pp_StartTBL;
 ULONG                       pp_CurrentTBL;
