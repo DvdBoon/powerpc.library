@@ -470,6 +470,16 @@ What has changed since 17.15:
   a node that had been in one), so RemovePPC(), RemTailPPC() and a walk back
   from the last node of the list went through it. The back link is set now,
   with the same stores as 17.13b and WarpOS; 17.15 had lost one of them.
+- ObtainSemaphoreSharedPPC() raised the semaphore's nest count after it had
+  released the library's lock, so a task switch between reading and writing
+  the count, with another task obtaining or releasing the same semaphore in
+  between, lost one update. A lost increment let a later release take the
+  count to 0 while a reader still held the semaphore (an exclusive waiter was
+  then handed it) or below 0 (which halts the task); a lost decrement left the
+  count above 0, so the last release woke nobody and a waiting task slept for
+  good. The count is raised before the lock is released now. 17.13b and WarpOS
+  release the lock first, so this release differs from them on purpose;
+  ObtainSemaphorePPC(), whose count only its owner writes, keeps their order.
 
 What has changed since 17.14:
 

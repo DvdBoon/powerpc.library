@@ -4027,17 +4027,40 @@ PPCFUNCTION VOID myObtainSemaphoreSharedPPC(__reg("r3") struct PrivatePPCBase* P
 
     while (!(LockMutexPPC((volatile ULONG)&PowerPCBase->pp_Mutex)));
 
+    /*
+     * W5: THE NEST COUNT IS RAISED BEFORE pp_Mutex IS FREED. Both grants below
+     * freed the mutex and then did "lha, addi, sth" on ss_NestCount. An
+     * exception taken after the lha and before the sth could switch tasks
+     * there: the kernel holds a switch back only for code between the
+     * jump-table targets of InsertPPC and FindNamePPC (the list functions,
+     * pp_LowerLimit and pp_UpperLimit, kernel.c) or while pp_Mutex or Forbid is
+     * set, and this function lies outside that span with the mutex already
+     * free. Another task's obtain or release of the same semaphore changed the
+     * count meanwhile, and the sth wrote back the old value plus one. A lost
+     * increment let a later release take the count to 0 while a reader still
+     * held the semaphore (a queued exclusive waiter was then handed it) or
+     * below 0 (which halts the task); a lost decrement left the count above 0
+     * at the last release, which then handed off to nobody and left a queued
+     * waiter asleep. Every other writer of the count holds pp_Mutex:
+     * ReleaseSemaphorePPC and its hand-offs, both attempts, TrySemaphorePPC and
+     * ProcurePPC. This DIVERGES from all three sources, which free the lock
+     * first (17.13b ppcfunctions.p:6023-6025 after AtomicDone, WarpOS
+     * powerpc.p:13781-13784 after PERMIT, 17.15's C port), as R1 did at the
+     * hand-off: the same three instructions, under the lock.
+     * myObtainSemaphorePPC keeps its order, because while its caller is the
+     * owner no other task writes the count. Test: tests/semnest.
+     */
     if (!(SemaphorePPC->ssppc_SS.ss_QueueCount += 1))
     {
-        FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
         SemaphorePPC->ssppc_SS.ss_NestCount += 1;
+        FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
     }
     else
     {
         if ((!(SemaphorePPC->ssppc_SS.ss_Owner)) || (SemaphorePPC->ssppc_SS.ss_Owner == (struct Task*)myTask))
         {
-            FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
             SemaphorePPC->ssppc_SS.ss_NestCount += 1;
+            FreeMutexPPC((ULONG)&PowerPCBase->pp_Mutex);
         }
         else
         {
