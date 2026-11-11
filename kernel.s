@@ -1111,6 +1111,15 @@ _SmallExcHandler:  #debugdebug to be redone
 #       sequences would avoid that at ~136 bytes, and were weighed and
 #       declined.
         stmw    r14,340(r1)
+#       K5: r13 IS A NON-VOLATILE TOO, and the one the stmw above does not
+#       cover. _LoadFrame loads the interrupted program's r13 from the frame and
+#       the handler may leave anything in it, so the caller's own r13 -- a value
+#       vbcc may keep live across the call -- came back as the task's. The
+#       originals have no save to copy: 17.13b parks what it needs across the
+#       handler in SPRG0-SPRG3 and the frame (setupppc.p:5947-5960, :5980-5996)
+#       and WarpOS on its stack (powerpc.p:6944-6959), and both reload it after
+#       the blrl. REVIEW-LIB.md K5.
+        stw     r13,SEH_R13(r1)
 
         mr      r31,r4
         stw     r4,316(r1)                   #iframe. WAS mtsprg0, which _LoadFrame
@@ -1208,6 +1217,7 @@ _SmallExcHandler:  #debugdebug to be redone
 #       only, all volatile or separately restored, so this is the last moment
 #       they are needed and the first at which they may be overwritten.
         lmw     r14,340(r1)
+        lwz     r13,SEH_R13(r1)              #K5
 
         lwz     r1,0(r1)
 
@@ -1221,93 +1231,156 @@ _SmallExcHandler:  #debugdebug to be redone
 
 _DoAlign:
 
-        lwz     r5,0(r4)
-        la      r11,IF_CONTEXT_GPR(r3)       #reg table
-        la      r12,IF_CONTEXT_FPR(r3)       #freg table
+#       K3 AND K7: THE EMULATION OF A MISALIGNED FP ACCESS. It began as 17.13b's
+#       (setupppc.p:4822-4890) and is now WarpOS's FPEmulation form
+#       (warpos/hal/warp.p:4222-4569). The MPC7410 takes an alignment exception
+#       for every floating-point operand that is not word-aligned and leaves the
+#       access to software (MPC7410UM 2.2.3 and 4.6.6, which also lists dcbz on a
+#       page that is write-through or cache-inhibited).
+#
+#       K3: THE DISPLACEMENT OF A D FORM IS SIGNED. This had "rlwinm r8,r5,0,16,31"
+#       and used it raw, as 17.13b does (setupppc.p:4827), so a negative
+#       displacement went 64 KB too high and the update forms put the wrong value in
+#       rA. WarpOS has "extsh r9,r3" (hal/warp.p:4231), and _DoDataStore below
+#       sign-extends too.
+#
+#       K7: ALL EIGHT D FORMS (lfs lfsu lfd lfdu stfs stfsu stfd stfdu,
+#       hal/warp.p:4234-4367) and, for primary opcode 31, lfsx lfsux lfdx lfdux
+#       stfsx stfsux stfdx stfdux stfiwx and dcbz (:4371-4555), told apart by the
+#       WHOLE extended opcode. The old code handled six D forms and, through
+#       .lstfsx, took every opcode-31 instruction whose extended opcode had bits
+#       64 and 32 clear for lfsx or stfsx, so a misaligned lwarx (20) or stwcx.
+#       (150) was "emulated" as an FP access. What is not listed ends in
+#       .HaltAlign, which leaves the exception to the task's handlers as before.
+#
+#       In: r3 = the iframe, r4 = the address of the instruction. Out: r3 = 1 if
+#       it was emulated, 0 if not. Uses r0, r3-r12 and f1, all volatile. The
+#       doubles are copied as two words, so no FP register is needed; only the
+#       single forms go through lfs and stfs, on the aligned word IF_ALIGNSTORE.
+#       r10 is the update flag from the decode on: 1 = rA gets the address. rA = 0
+#       with an update form is invalid, and updates nothing, as in WarpOS.
 
-        rlwinm  r6,r5,14,24,28               #get floating point register offset
-        rlwinm  r7,r5,18,25,29               #get destination register offset
-        mr.     r10,r7
-        beq     .ItsR0
-        lwzx    r10,r11,r7                   #get address from destination register
+        lwz     r5,0(r4)                     #the instruction
+        la      r11,IF_CONTEXT_GPR(r3)       #GPR table
+        la      r12,IF_CONTEXT_FPR(r3)       #FPR table
+        rlwinm  r6,r5,14,24,28               #frD or frS, times 8
+        rlwinm  r7,r5,18,25,29               #rA, times 4
+        li      r10,0
+        mr.     r7,r7
+        beq     .AlBase0                     #rA = 0 reads as the value 0, not r0
+        lwzx    r10,r11,r7                   #the base
 
-.ItsR0:	
-        rlwinm  r8,r5,0,16,31                #get displacement
-        rlwinm  r0,r5,6,26,31
-        cmpwi   r0,0x34                      #test for stfs
-        beq     .stfs
-        cmpwi   r0,0x35
-        beq     .stfsu
-        cmpwi   r0,0x30
-        beq     .lfs
-        cmpwi   r0,0x31
-        beq     .lfsu
-        cmpwi   r0,0x1f
-        beq     .lstfsx
-        cmpwi   r0,0x32
-        beq     .lfd
-        cmpwi   r0,0x36
-        beq     .stfd
+.AlBase0:
+        rlwinm  r8,r5,6,26,31                #primary opcode
+        cmpwi   r8,31
+        beq     .AlX
+        addi    r8,r8,-48                    #48..55: lfs lfsu lfd lfdu stfs stfsu stfd stfdu
+        cmplwi  r8,7
+        bgt     .HaltAlign
+        extsh   r9,r5                        #K3: the displacement is SIGNED
+        add     r9,r10,r9                    #the effective address
+        rlwinm  r10,r8,0,31,31               #the odd opcodes update rA
+        rlwinm  r8,r8,31,1,31                #0 load single, 1 load double, 2 store single, 3 store double
+        cmpwi   r8,0
+        beq     .AlLoadS
+        cmpwi   r8,1
+        beq     .AlLoadD
+        cmpwi   r8,2
+        beq     .AlStoreS
+        b       .AlStoreD
+
+.AlX:
+        rlwinm  r0,r5,31,22,31               #the extended opcode
+        rlwinm  r8,r5,23,25,29               #rB, times 4
+        lwzx    r8,r11,r8                    #the index
+        add     r9,r10,r8                    #the effective address: (rA or 0) + rB
+        li      r10,0                        #1 for the update forms, set below
+        cmpwi   r0,535                       #lfsx
+        beq     .AlLoadS
+        cmpwi   r0,599                       #lfdx
+        beq     .AlLoadD
+        cmpwi   r0,663                       #stfsx
+        beq     .AlStoreS
+        cmpwi   r0,727                       #stfdx
+        beq     .AlStoreD
+        li      r10,1
+        cmpwi   r0,567                       #lfsux
+        beq     .AlLoadS
+        cmpwi   r0,631                       #lfdux
+        beq     .AlLoadD
+        cmpwi   r0,695                       #stfsux
+        beq     .AlStoreS
+        cmpwi   r0,759                       #stfdux
+        beq     .AlStoreD
+        li      r10,0
+        cmpwi   r0,983                       #stfiwx
+        beq     .AlStoreIW
+        cmpwi   r0,1014                      #dcbz
+        beq     .AlDcbz
         b       .HaltAlign
 
-.stfd:		
-        lwzx    r9,r12,r6
-        stwx    r9,r10,r8
+.AlLoadS:
+        lwz     r0,0(r9)                     #the 32-bit operand
+        stw     r0,IF_ALIGNSTORE(r3)         #on an aligned spot
+        lfs     f1,IF_ALIGNSTORE(r3)         #single to double
+        stfdx   f1,r12,r6                    #into the frame's FPR
+        b       .AlDone
+
+.AlLoadD:
+        lwz     r0,0(r9)                     #the two words of the operand
+        lwz     r8,4(r9)
+        stwx    r0,r12,r6                    #into the frame's FPR
         addi    r6,r6,4
-        addi    r8,r8,4
-        lwzx    r9,r12,r6
-        stwx    r9,r10,r8
+        stwx    r8,r12,r6
+        b       .AlDone
+
+.AlStoreS:
+        lfdx    f1,r12,r6                    #the FPR from the frame
+        stfs    f1,IF_ALIGNSTORE(r3)         #double to single, on an aligned spot
+        lwz     r0,IF_ALIGNSTORE(r3)
+        stw     r0,0(r9)                     #to the operand
+        b       .AlDone
+
+.AlStoreD:
+        lwzx    r0,r12,r6                    #the two words of the FPR
+        addi    r6,r6,4
+        lwzx    r8,r12,r6
+        stw     r0,0(r9)                     #to the operand
+        stw     r8,4(r9)
+        b       .AlDone
+
+.AlStoreIW:
+        addi    r6,r6,4
+        lwzx    r0,r12,r6                    #the low word of the FPR
+        stw     r0,0(r9)
+        b       .AlDone
+
+.AlDcbz:
+        rlwinm  r9,r9,0,0,26                 #the 32-byte line
+        li      r0,0
+        stw     r0,0(r9)
+        stw     r0,4(r9)
+        stw     r0,8(r9)
+        stw     r0,12(r9)
+        stw     r0,16(r9)
+        stw     r0,20(r9)
+        stw     r0,24(r9)
+        stw     r0,28(r9)
         b       .AligExit
 
-.stfsu:		
-        add     r9,r10,r8
-        stwx    r9,r11,r7
+.AlDone:
+        mr.     r10,r10
+        beq     .AligExit                    #no update form
+        mr.     r7,r7
+        beq     .AligExit                    #rA = 0: nothing to update
+        stwx    r9,r11,r7                    #rA = the effective address
 
-.stfs:		
-        lfdx    f1,r12,r6                    #get value from fp register
-        stfs    f1,IF_ALIGNSTORE(r3)         #store it on correct aligned spot
-        lwz     r6,IF_ALIGNSTORE(r3)         #Get the correct 32 bit value
-        stwx    r6,r10,r8                    #Store correct value
-        b       .AligExit
-
-.lfd:
-        lwzx    r9,r10,r8
-        stw     r9,IF_ALIGNSTORE(r3)
-        addi    r8,r8,4
-        lwzx    r9,r10,r8
-        stw     r9,IF_ALIGNSTORE+4(r3)
-        lfd     f1,IF_ALIGNSTORE(r3)
-        stfdx   f1,r12,r6
-        b       .AligExit
-
-.lfsu:	
-        add     r5,r10,r8                    #Add displacement
-        stwx    r5,r11,r7
-
-.lfs:	
-        lwzx    r9,r10,r8                    #Get 32 bit value
-        stw     r9,IF_ALIGNSTORE(r3)         #Store it on aligned spot
-        lfs     f1,IF_ALIGNSTORE(r3)         #Get it and convert it to 64 bit
-        stfdx   f1,r12,r6                    #Store the 64 bit value
-        b       .AligExit
-
-.lstfsx:
-        rlwinm. r0,r5,25,31,31               #0 = s; 1 = d
-        bne     .HaltAlign
-        rlwinm. r0,r5,26,31,31               #0 = x; 1 = ux
-        bne     .HaltAlign
-
-        rlwinm  r8,r5,23,25,29               #get index register
-        lwzx    r8,r11,r8                    #get index register value
-        rlwinm. r0,r5,24,31,31
-        bne     .stfs
-        b       .lfs
+.AligExit:
+        li      r3,1
+        blr
 
 .HaltAlign:
         li      r3,0
-        blr
-.AligExit:
-        li      r3,1
         blr
 
 #********************************************************************************************

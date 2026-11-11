@@ -159,6 +159,9 @@
 # the first word after the r14-r31 save at 340-411 (REVIEW-LIB.md K2).
 .set SEH_LR,                    412
 .set SEH_R2,                    416
+# K5: the caller's r13, kept beside r14-r31 (stmw at 340-411). 420 is the first
+# word after SEH_R2; the frame is 512 bytes (REVIEW-LIB.md K5).
+.set SEH_R13,                   420
 
 .set PPCTASK_FLAGS,             0x0E
 .set PPCTASK_SWITCH,            0x42

@@ -436,6 +436,14 @@ What has changed since 17.15:
   decrementer never ran out; it now only shortens what is left when the same
   task keeps running. The Harrier set-up counted 983,299 interrupt
   acknowledgements at every start where 15 are meant; it counts 15.
+- A floating-point access that is not word-aligned, which a G3 or G4 hands to
+  software, was emulated with the displacement taken as unsigned, so a negative
+  displacement went 64 KB too far and the update forms left a wrong value in the
+  base register; it is signed now. The emulation lacked lfdu, stfdu, lfsux,
+  lfdx, lfdux, stfsux, stfdx, stfdux, stfiwx and dcbz, which WarpOS has; they
+  are emulated, and a misaligned lwarx or stwcx. is no longer taken for a float
+  access: it goes to the task's exception handlers, as in WarpOS. The code that
+  runs a SMALLCONTEXT exception handler now keeps its caller's r13.
 
 What has changed since 17.14:
 
