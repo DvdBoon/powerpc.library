@@ -2309,6 +2309,293 @@ struct InitData* SetupKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
 
 /********************************************************************************************
 *
+*   The PPC memory of a Harrier card -- REVIEW-LIB.md L5, the user's rule of 11 Nov 2026.
+*
+*   There are two sizes. The PPC memory is the RAM on the card: 64, 128, 256 or 512 MB. The
+*   PCI memory is the part of it the Amiga can reach, through pieces of PCI space of 64, 128
+*   and 256 MB that pci.library hands out; it can be smaller than the RAM, because that space
+*   is shared with the graphics card. The controller's setting (SDBAA, SIZE) has to say the
+*   RAM's real size, whatever the PCI memory is: a setting larger than the RAM makes the upper
+*   part of the bank a mirror of the lower part, and the setting keeps its value through a
+*   warm reset (Harrier programmer's guide, SDBA, p. 3-30: power-up reset alone changes SIZE).
+*   The library therefore measures the RAM, as far as the PCI memory reaches, and maps the
+*   largest PCI memory the measurement proves:
+*
+*       PPC memory   PCI memory, in the order tried
+*       512 MB       256+128, 256+64, 256, 192 (128+64), 128, 64
+*       256 MB       256, 192, 128, 64
+*       128 MB       128, 64
+*        64 MB       64
+*
+*   Before this, a bank that announced its size was mapped in that order without a test, 64 MB
+*   was not known at all, and a bank that announced nothing was tested only when it got 256 MB
+*   (17.15's code, which dropped 17.13b's ENV Harrier256MB and its wrap test of every size
+*   but 16M8, powerpc.s:1183-1202). A 128 MB board that got 192 MB of PCI memory was left
+*   with its top 64 MB mirroring its bottom 64 MB, page table and library base included.
+*
+*********************************************************************************************/
+
+/*
+ * Table 3-14 of the programmer's guide (PDF 205): the codes of SDBA's SIZE field. A code names a bank's
+ * size and the width of its chips: 4, 8 or 16 bits. The library supports banks of 64 to 512 MB. Code 15
+ * (256M4) is a 128 MB bank here, as it has been since 17.15 (the source calls it debugdebug); the codes
+ * for 32 MB and for 1 GB or more are not supported.
+ */
+static ULONG harrierBankMB(ULONG code)
+{
+    switch (code)
+    {
+        case 2:
+        case 3:
+        {
+            return 64;
+        }
+        case 4:
+        case 5:
+        case 6:
+        case 15:
+        {
+            return 128;
+        }
+        case 7:
+        case 8:
+        case 9:
+        {
+            return 256;
+        }
+        case 10:
+        case 11:
+        case 12:
+        {
+            return 512;
+        }
+    }
+    return 0;
+}
+
+static ULONG harrierBankWidth(ULONG code)
+{
+    switch (code)
+    {
+        case 4:
+        case 7:
+        case 10:
+        case 15:
+        {
+            return 4;
+        }
+        case 2:
+        case 5:
+        case 8:
+        case 11:
+        {
+            return 8;
+        }
+        case 3:
+        case 6:
+        case 9:
+        case 12:
+        {
+            return 16;
+        }
+    }
+    return 0;
+}
+
+/* the code for a bank of mb MB in chips of this width, 0 when Table 3-14 has none */
+static ULONG harrierBankCode(ULONG mb, ULONG width)
+{
+    ULONG code;
+
+    for (code = 2; code <= 12; code++)
+    {
+        if ((harrierBankMB(code) == mb) && (harrierBankWidth(code) == width))
+        {
+            return code;
+        }
+    }
+    return 0;
+}
+
+static ULONG harrierPciCode(ULONG size)
+{
+    switch (size)
+    {
+        case 0x10000000:
+        {
+            return PCIMEM_256MB;
+        }
+        case 0x8000000:
+        {
+            return PCIMEM_128MB;
+        }
+    }
+    return PCIMEM_64MB;
+}
+
+/*
+ * The PCI memory for a PPC memory of bank bytes: the largest layout pci.library gives, in the order of the
+ * table above. A main piece is taken for BAR 2; a second piece, for BAR 4, is kept only when it ends where
+ * the main piece begins. Returns the layout's size (0 when not even 64 MB can be had), *base its first PCI
+ * address and *pieces 1 or 2.
+ */
+static ULONG harrierPciMemory(struct InternalConsts* myConsts, ULONG ppcdevice, ULONG bank, ULONG* base, ULONG* pieces)
+{
+    ULONG mainSize, extraSize, mainBase, extraBase;
+
+    for (mainSize = 0x10000000; mainSize >= 0x4000000; mainSize >>= 1)
+    {
+        if (mainSize > bank)
+        {
+            continue;
+        }
+        if (!(mainBase = AllocPCIMem(myConsts, ppcdevice, harrierPciCode(mainSize), PCIBAR_2)))
+        {
+            continue;
+        }
+        for (extraSize = (mainSize >> 1); extraSize >= 0x4000000; extraSize >>= 1)
+        {
+            if ((mainSize + extraSize) > bank)
+            {
+                continue;
+            }
+            if (extraBase = AllocPCIMem(myConsts, ppcdevice, harrierPciCode(extraSize), PCIBAR_4))
+            {
+                if ((extraBase + extraSize) == mainBase)
+                {
+                    *base = extraBase;
+                    *pieces = 2;
+                    return (mainSize + extraSize);
+                }
+                FreePCIMem(myConsts, ppcdevice, PCIBAR_4);
+            }
+        }
+        *base = mainBase;
+        *pieces = 1;
+        return mainSize;
+    }
+    return 0;
+}
+
+/*
+ * The inbound windows for a layout of the sizes above: window 1 from RAM offset 0 and, for the three layouts
+ * of two pieces, window 2 above it with ITAT2 enabled. window2Was says that an earlier layout had window 2 on,
+ * and it is switched off again when this one has a single piece.
+ */
+static ULONG harrierWindows(struct InternalConsts* myConsts, ULONG devfuncnum, ULONG offset, ULONG ppcmemBase,
+                            ULONG ppcmemSize, ULONG window2Was)
+{
+    ULONG resl;
+
+    WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR1, (ppcmemBase - offset));
+
+    switch (ppcmemSize)
+    {
+        case 0x10000000:
+        {
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_256MB));
+            break;
+        }
+        case 0x8000000:
+        {
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_128MB));
+            break;
+        }
+        case 0x4000000:
+        {
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_64MB));
+            break;
+        }
+        case 0x18000000:
+        {
+            resl = ReadConfigLong(myConsts, devfuncnum, PCFS_ITAT2);
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITAT2, resl | (PCFS_ITAT_GBL | PCFS_ITAT_ENA
+                           | PCFS_ITAT_WPE | PCFS_ITAT_RAE));
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_128MB));
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ2, (PPC_RAM_BASE + 0x8000000 | PCFS_ITSZ_256MB));
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR2, (ppcmemBase - offset) + 0x8000000);
+            break;
+        }
+        case 0x14000000:
+        {
+            resl = ReadConfigLong(myConsts, devfuncnum, PCFS_ITAT2);
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITAT2, resl | (PCFS_ITAT_GBL | PCFS_ITAT_ENA
+                           | PCFS_ITAT_WPE | PCFS_ITAT_RAE));
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_64MB));
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ2, ((PPC_RAM_BASE + 0x4000000) | PCFS_ITSZ_256MB));
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR2, (ppcmemBase - offset) + 0x4000000);
+            break;
+        }
+        case 0xC000000:
+        {
+            resl = ReadConfigLong(myConsts, devfuncnum, PCFS_ITAT2);
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITAT2, resl | (PCFS_ITAT_GBL | PCFS_ITAT_ENA
+                           | PCFS_ITAT_WPE | PCFS_ITAT_RAE));
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_64MB));
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ2, ((PPC_RAM_BASE + 0x4000000) | PCFS_ITSZ_128MB));
+            WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR2, (ppcmemBase - offset) + 0x4000000);
+            break;
+        }
+        default:
+        {
+            PrintCrtErr(myConsts, "Could not allocate sufficient PCI memory");
+            return FALSE;
+        }
+    }
+
+    if ((window2Was) && ((ppcmemSize == 0x10000000) || (ppcmemSize == 0x8000000) || (ppcmemSize == 0x4000000)))
+    {
+        resl = ReadConfigLong(myConsts, devfuncnum, PCFS_ITAT2);
+        WriteConfigLong(myConsts, devfuncnum, PCFS_ITAT2, (resl & ~PCFS_ITAT_ENA));
+    }
+    return TRUE;
+}
+
+/*
+ * THE MIRROR TEST. A bank set larger than its RAM answers every address from the RAM's size up with the RAM
+ * again, so a word written b bytes up lands on the first word when b is a multiple of the RAM's size. The first
+ * word gets a value of its own and then a different marker goes to each of 64, 128 and 256 MB that the PCI
+ * memory reaches (below size); the caches are cleared, and every place is read back. A place that reads the same
+ * as the first word is a mirror of it, and the smallest such offset is the RAM's size. Returns that offset, or 0
+ * when none of them repeats the first word -- also when the first word reads as something that was not written,
+ * which proves nothing. The markers differ with the size so that a word left by an earlier pass cannot pass for
+ * this one, and the caches are cleared because the 68k may keep the region in its data cache.
+ */
+static ULONG harrierMirror(struct InternalConsts* myConsts, ULONG base, ULONG size)
+{
+    struct ExecBase* SysBase = myConsts->ic_SysBase;
+    ULONG key = SUPERKEY ^ size;
+    ULONG first, tag, b;
+
+    writememL(base, 0, ~key);
+
+    for (b = 0x4000000; b < size; b <<= 1)
+    {
+        writememL(base, b, key ^ (b >> 20));
+    }
+
+    CacheClearU();
+
+    first = readmemL(base, 0);
+    tag   = first ^ key;
+
+    if ((tag != 0x40) && (tag != 0x80) && (tag != 0x100))
+    {
+        return 0;
+    }
+
+    for (b = 0x4000000; b < size; b <<= 1)
+    {
+        if (readmemL(base, b) == first)
+        {
+            return b;
+        }
+    }
+    return 0;
+}
+
+/********************************************************************************************
+*
 *   Setting up cards based on the Harrier chipset (PowerPlus III).
 *
 *********************************************************************************************/
@@ -2403,185 +2690,65 @@ struct InitData* SetupHarrier(struct InternalConsts* myConsts, ULONG devfuncnum,
     writememL(configBase, XCSR_XPAT3, XPatSetting);
 
     ULONG valueSDBAA = readmemL(configBase, XCSR_SDBAA);
-    ULONG memSize = valueSDBAA & XCSR_SDBA_SIZE;
-    ULONG cpuStat = readmemL(configBase, XCSR_BXCS);
+    ULONG sizeCode   = (valueSDBAA & XCSR_SDBA_SIZE) >> 16;
+    ULONG cpuStat    = readmemL(configBase, XCSR_BXCS);
     ULONG ppcmemSize = 0;
-    ULONG baseAlt;
+    ULONG pieces     = 0;
+    ULONG window2On  = 0;
+    ULONG unset      = (sizeCode == 0);
+    ULONG bankMB     = 256;
+    ULONG width      = 8;
+    ULONG code;
+    ULONG mirrorAt;
 
     if (!(cpuStat & XCSR_BXCS_BP0H))
     {
         writememL(configBase, XCSR_BXCS, (cpuStat | XCSR_BXCS_BP0H));
     }
 
-    switch (memSize)
+    /*
+     * WHAT THE SETTING ANNOUNCES is the most the RAM can be: 64, 128, 256 or 512 MB, in the chip width the
+     * board's firmware chose, or nothing at all (SIZE 0), for which the library starts from 256 MB as 17.15
+     * does and writes its own setting, in the 8-bit organization 17.13b assumes (powerpc.s:997-1000). The
+     * mirror test below then proves the size, or finds the RAM smaller; a code the library does not know ends
+     * in the error 17.15 gave for it.
+     */
+    if (!(unset))
     {
-        case XCSR_SDBA_32M8:
+        if (!(bankMB = harrierBankMB(sizeCode)))
         {
-            if (ppcmemBase = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_256MB, PCIBAR_2))
-            {
-                ppcmemSize = 0x10000000;
-            }
-            else if (ppcmemBase = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_128MB, PCIBAR_2))
-            {
-                ppcmemSize = 0x8000000;
-                if (baseAlt = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_64MB, PCIBAR_4))
-                {
-                    if (baseAlt + 0x4000000 == ppcmemBase)
-                    {
-                        ppcmemSize += 0x4000000;
-                        ppcmemBase = baseAlt;
-                    }
-                    else
-                    {
-                        FreePCIMem(myConsts, (ULONG)ppcdevice, PCIBAR_4);
-                    }
-                }
-            }
-            break;
-        }
-        case XCSR_SDBA_256M4:    //debugdebug
-        case XCSR_SDBA_16M8:
-        {
-            if (!(ppcmemBase = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_128MB, PCIBAR_2)))
-            {
-                break;
-            }
-            ppcmemSize = 0x8000000;
-            break;
-        }
-        case XCSR_SDBA_64M8:
-        {
-            if (ppcmemBase = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_256MB, PCIBAR_2))
-            {
-                ppcmemSize = 0x10000000;
-                if (baseAlt = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_128MB, PCIBAR_4))
-                {
-                    if (baseAlt + 0x8000000 == ppcmemBase)
-                    {
-                        ppcmemSize += 0x8000000;
-                        ppcmemBase = baseAlt;
-                    }
-                    else
-                    {
-                        FreePCIMem(myConsts, (ULONG)ppcdevice, PCIBAR_4);
-                    }
-                }
-                else if (baseAlt = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_64MB, PCIBAR_4))
-                {
-                    if (baseAlt + 0x4000000 == ppcmemBase)
-                    {
-                        ppcmemSize += 0x4000000;
-                        ppcmemBase = baseAlt;
-                    }
-                    else
-                    {
-                        FreePCIMem(myConsts, (ULONG) ppcdevice, PCIBAR_4);
-                    }
-                }
-            }
-            else if (ppcmemBase = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_128MB, PCIBAR_2))
-            {
-                ppcmemSize = 0x8000000;
-            }
-            break;
-        }
-        case 0:
-        {
-            if (ppcmemBase = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_256MB, PCIBAR_2))
-            {
-                ppcmemSize = 0x10000000;
-                valueSDBAA |= XCSR_SDBA_32M8;
-            }
-            else if (ppcmemBase = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_128MB, PCIBAR_2))
-            {
-                ppcmemSize = 0x8000000;
-                if (baseAlt = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_64MB, PCIBAR_4))
-                {
-                    if (baseAlt + 0x4000000 == ppcmemBase)
-                    {
-                        ppcmemSize += 0x4000000;
-                        ppcmemBase = baseAlt;
-                        valueSDBAA |= XCSR_SDBA_32M8;
-                    }
-                    else
-                    {
-                        FreePCIMem(myConsts, (ULONG)ppcdevice, PCIBAR_4);
-                    }
-                }
-                if (ppcmemSize == 0x8000000)
-                {
-                    valueSDBAA |= XCSR_SDBA_16M8;
-                }
-            }
-            else
-            {
-                break;
-            }
-
-            writememL(configBase, XCSR_SDTC, XCSR_SDTC_DEFAULT);
-            writememL(configBase, XCSR_SDGC, XCSR_SDGC_MXRR_7 | XCSR_SDGC_DERC);
-            break;
-
-        }
-        default:
-        {
-            D(("Detected unsupported size of %08lx\n", memSize));
+            D(("Detected unsupported size of %08lx\n", (valueSDBAA & XCSR_SDBA_SIZE)));
             PrintCrtErr(myConsts, "Could not determine size of PPC memory");
             return FALSE;
         }
+        width = harrierBankWidth(sizeCode);
+    }
+
+    if (!(ppcmemSize = harrierPciMemory(myConsts, (ULONG)ppcdevice, (bankMB << 20), &ppcmemBase, &pieces)))
+    {
+        PrintCrtErr(myConsts, "Could not allocate sufficient PCI memory");
+        return FALSE;
+    }
+
+    if (unset)
+    {
+        /* the smallest bank that covers what was mapped: 64, 128 or 256 MB */
+        for (bankMB = 64; ((bankMB << 20) < ppcmemSize); bankMB <<= 1)
+        {
+        }
+        valueSDBAA = (valueSDBAA & ~XCSR_SDBA_SIZE) | (harrierBankCode(bankMB, 8) << 16);
+
+        writememL(configBase, XCSR_SDTC, XCSR_SDTC_DEFAULT);
+        writememL(configBase, XCSR_SDGC, XCSR_SDGC_MXRR_7 | XCSR_SDGC_DERC);
     }
 
     writememL(configBase, XCSR_SDBAA, (valueSDBAA | XCSR_SDBA_ENA));
-    WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR1, (ppcmemBase - offset));
 
-    switch (ppcmemSize)
+    if (!(harrierWindows(myConsts, devfuncnum, offset, ppcmemBase, ppcmemSize, 0)))
     {
-        case 0x10000000:
-        {
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_256MB));
-            break;
-        }
-        case 0x8000000:
-        {
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_128MB));
-            break;
-        }
-        case 0x18000000:
-        {
-            resl = ReadConfigLong(myConsts, devfuncnum, PCFS_ITAT2);
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITAT2, resl | (PCFS_ITAT_GBL | PCFS_ITAT_ENA
-                           | PCFS_ITAT_WPE | PCFS_ITAT_RAE));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_128MB));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ2, (PPC_RAM_BASE + 0x8000000 | PCFS_ITSZ_256MB));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR2, (ppcmemBase - offset) + 0x8000000);
-            break;
-        }
-        case 0x14000000:
-        {
-            resl = ReadConfigLong(myConsts, devfuncnum, PCFS_ITAT2);
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITAT2, resl | (PCFS_ITAT_GBL | PCFS_ITAT_ENA
-                           | PCFS_ITAT_WPE | PCFS_ITAT_RAE));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_64MB));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ2, ((PPC_RAM_BASE + 0x4000000) | PCFS_ITSZ_256MB));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR2, (ppcmemBase - offset) + 0x4000000);
-            break;
-        }
-        case 0xC000000:
-        {
-            resl = ReadConfigLong(myConsts, devfuncnum, PCFS_ITAT2);
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITAT2, resl | (PCFS_ITAT_GBL | PCFS_ITAT_ENA
-                           | PCFS_ITAT_WPE | PCFS_ITAT_RAE));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_64MB));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ2, ((PPC_RAM_BASE + 0x4000000) | PCFS_ITSZ_128MB));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR2, (ppcmemBase - offset) + 0x4000000);
-            break;
-        }
-        default:
-        {
-            PrintCrtErr(myConsts, "Could not allocate sufficient PCI memory");
-            return FALSE;
-        }
+        return FALSE;
     }
+    window2On = (pieces == 2);
 
     ULONG valueSDGC = readmemL(configBase, XCSR_SDGC);
     writememL(configBase, XCSR_SDGC, valueSDGC | XCSR_SDGC_ENRV_ENA);
@@ -2606,19 +2773,44 @@ struct InitData* SetupHarrier(struct InternalConsts* myConsts, ULONG devfuncnum,
     writememL(configBase, XCSR_OTAD0, value);
     writememL(configBase, XCSR_OTAT0, value2);
 
-    if ((ppcmemSize == 0x10000000) && !(memSize))
+    /*
+     * THE MIRROR TEST AND ITS DOWNSIZING -- L5. The layout is tested as far as it reaches. When the RAM turns out
+     * smaller than the bank assumed, its size is the offset of the first mirror: the pieces of PCI memory go back,
+     * the setting is rewritten to that size (in the width the board announced, or the library's 8 bits for a bank
+     * that announced nothing; when Table 3-14 has no code of that width the announced one stays, and the part
+     * above the RAM is simply not mapped), the largest layout for the smaller size is taken, and the test is made
+     * again on it. 17.15 made this test for a 256 MB layout of an unset bank alone, and stopped at 128 MB;
+     * 17.13b wrap-tested every size but 16M8 and stopped with an error (powerpc.s:1183-1202).
+     */
+    while ((mirrorAt = harrierMirror(myConsts, ppcmemBase, ppcmemSize)))
     {
-        writememL(ppcmemBase, 0x8000000, SUPERKEY);
-        if (readmemL(ppcmemBase, 0) == SUPERKEY)
+        D(("PPC memory mirrors at %08lx\n", mirrorAt));
+
+        if (pieces == 2)
         {
-            FreePCIMem(myConsts, (ULONG)ppcdevice, PCIBAR_2);
-            ppcmemBase = AllocPCIMem(myConsts, (ULONG)ppcdevice, PCIMEM_128MB, PCIBAR_2);
-            ppcmemSize = 0x8000000;
-            valueSDBAA &= ~XCSR_SDBA_SIZE;
-            writememL(configBase, XCSR_SDBAA, (valueSDBAA | XCSR_SDBA_16M8 | XCSR_SDBA_ENA));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITOFSZ1, (PPC_RAM_BASE | PCFS_ITSZ_128MB));
-            WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR1, (ppcmemBase - offset));
+            FreePCIMem(myConsts, (ULONG)ppcdevice, PCIBAR_4);
         }
+        FreePCIMem(myConsts, (ULONG)ppcdevice, PCIBAR_2);
+
+        bankMB = (mirrorAt >> 20);
+        if (code = harrierBankCode(bankMB, width))
+        {
+            valueSDBAA = (valueSDBAA & ~XCSR_SDBA_SIZE) | (code << 16);
+        }
+
+        if (!(ppcmemSize = harrierPciMemory(myConsts, (ULONG)ppcdevice, mirrorAt, &ppcmemBase, &pieces)))
+        {
+            PrintCrtErr(myConsts, "Could not allocate sufficient PCI memory");
+            return FALSE;
+        }
+
+        writememL(configBase, XCSR_SDBAA, (valueSDBAA | XCSR_SDBA_ENA));
+
+        if (!(harrierWindows(myConsts, devfuncnum, offset, ppcmemBase, ppcmemSize, window2On)))
+        {
+            return FALSE;
+        }
+        window2On = (pieces == 2);
     }
 
     if (myConsts->ic_pciType == VENDOR_E3B)

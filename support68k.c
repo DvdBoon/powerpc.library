@@ -956,6 +956,38 @@ FUNC68K void MirrorTask(void)
      */
     BPTR startDir = ((struct Process*)myTask)->pr_CurrentDir;
 
+    /*
+     * THE PORT IS MADE AFTER THE WAIT FOR CTRL_F, NOT BEFORE IT -- REVIEW-LIB.md P6.
+     *
+     * MasterControl ORs the PPC task's tc_SigAlloc into this process's own
+     * (the ID_T68K arm, support68k.c) and sends CTRL_F only after that.
+     * CreateMsgPort AllocSignal()s the port's bit on this process, and exec
+     * hands out bit 31 first (portbit=1f on every line of the 22 Oct log,
+     * FIXES.md item 19). Made BEFORE the OR, the port took bit 31 -- the bit
+     * a PPC task gets from its first AllocSignalPPC(-1) as well, which counts
+     * down from 31 too. The two sides then shared bit 31, andTemp (below) left
+     * the port's bit out of everything that crosses, and a signal on it was
+     * dropped for as long as the pair lived: the symptom of item 19, for a
+     * task that reserved its bit before its first Run68K. Which of the two
+     * ran first was the scheduler's; commit b0e3fc4 records the order that
+     * hung on the user's hardware. Its "|=" in MasterControl closed that hang
+     * and left the shared bit.
+     *
+     * 17.13b has the order by construction: its MirrorTask waits on its message
+     * port for the creator's message before it calls CreateMsgPort
+     * (powerpc.s:2120-2129), and MsgMir68 assigns the PPC task's signals to
+     * TC_SIGALLOC before it sends that message (:2096-2098). Waiting for the
+     * CTRL_F that MasterControl sends after its OR is the same order here, so
+     * the bit allocated below is chosen against the PPC task's mask and cannot
+     * be one it reserved.
+     *
+     * The flag clearing stays with the call it surrounds. A CreateMsgPort that
+     * fails now returns after the Wait, so MasterControl's Signal finds this
+     * process alive; before, it could return first and leave the Signal to hit
+     * a process that had already gone.
+     */
+    ULONG mySignal = Wait(SIGBREAKF_CTRL_F);
+
     myTask->tc_Flags &= ~TF_PPC;
 
     if (!(mirrorPort = CreateMsgPort()))
@@ -966,8 +998,6 @@ FUNC68K void MirrorTask(void)
     }
 
     myTask->tc_Flags |= TF_PPC;
-
-    ULONG mySignal = Wait(SIGBREAKF_CTRL_F);
 
     if (myFrame = (struct MsgFrame*)myTask->tc_UserData)
     {
@@ -1251,8 +1281,10 @@ FUNC68K void MasterControl(void)
 						 * OR, NEVER ASSIGN -- FIXES.md item 19, and this was
 						 * a RACE that hung a self-started PPC task.
 						 *
-						 * This was "=". MirrorTask calls CreateMsgPort()
-						 * BEFORE it waits for the CTRL_F below, and
+						 * This was "=". MirrorTask called CreateMsgPort()
+						 * BEFORE it waited for the CTRL_F below (it waits
+						 * first since REVIEW-LIB.md P6, so this OR now
+						 * always lands before its port is made), and
 						 * CreateMsgPort AllocSignal()s a bit on that very
 						 * Process. mf_Arg[0] is the PPC task's tc_SigAlloc,
 						 * which for a CreateTaskPPC task is SYS_SIGALLOC =
@@ -1287,7 +1319,8 @@ FUNC68K void MasterControl(void)
 						 * functions68k.c.
 						 *
 						 * THIS ONE STAYS. It runs once, before the new mirror
-						 * has waited on anything: a seed, the 68k twin of the
+						 * has made its port (P6: it waits for the CTRL_F
+						 * sent below first): a seed, the 68k twin of the
 						 * "tc_SigAlloc = mf_Arg[1]" that kernel.c gives a new
 						 * PPC task. The per-crossing merges that made the two
 						 * masks ratchet up to one union are the ones removed.

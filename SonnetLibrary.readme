@@ -515,6 +515,32 @@ What has changed since 17.15:
   gave a length of 64 where AllocXMsgPPC() gives 96, and a program that copied
   or forwarded a message by its length lost the last 20 bytes. The header is
   counted now, as 17.13b and WarpOS do.
+- The 68k process that stands for a PPC task made with CreateTaskPPC() (the one
+  that carries out the task's calls to the 68k) made its message port before
+  MasterControl had added the task's signal bits to its own, and which of the
+  two ran first was up to the scheduler. When the port came first it took signal
+  bit 31, which AllocSignalPPC(-1) gives the task as well: the two sides then
+  shared bit 31, and a signal on it was dropped between them for as long as the
+  pair lived. The process waits for MasterControl's signal before it makes the
+  port now, so the port's bit is chosen against the task's bits and cannot be
+  one of them. 17.13b gets the same order by waiting for its creator's message
+  first; WarpOS builds its 68k process differently.
+- The memory of a Harrier card was sized from a setting in the memory controller
+  that the card's firmware may or may not have made, and it was tested for a
+  mirror when a card with the setting unset got 256 MB of PCI space. A 128 MB
+  card that got 192 MB of PCI space was mapped as 192 MB, so the top 64 MB of
+  the PPC memory was its bottom 64 MB again (a mirror), with the page table and
+  the library's own structures in it, and a 64 MB card was not known at all.
+  The library measures the RAM now. It reads the setting as a size of 64, 128,
+  256 or 512 MB (any chip width; a card with the setting unset starts from 256
+  MB), takes the largest PCI memory it can get for that size (512 MB: 256+128,
+  256+64, 256, 192, 128 or 64; 256 MB: 256, 192, 128 or 64), writes a word at
+  the start and 64, 128 and 256 MB further up as far as the PCI memory reaches,
+  and where a word comes back at the start the RAM is that size: the PCI memory
+  goes back, the setting is rewritten to the size found and the largest PCI
+  memory that fits is taken. A card that announces its size and has that much
+  RAM is mapped as before. 17.13b tested every size but 16M8 and stopped with
+  "PPC memory wrapping error detected. Please reboot!"; this release goes on.
 
 What has changed since 17.14:
 
