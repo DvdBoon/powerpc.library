@@ -203,45 +203,52 @@ void mvfrBAT3(struct BATArray*)
           \tmfdbatl\tr4,3\n\
           \tstw\tr4,12(r3)\n";
 
+/*
+ * S7, REVIEW-LIB.md: THE FOUR WORDS OF A BATArray GO TO IBATnU, IBATnL, DBATnU AND DBATnL, in that
+ * order, as mvfrBAT0-3 above store them and as WarpOS writes a BAT (BATSetup, powerpc.p:588-625).
+ * These four wrote IBATnU four times and left the other three registers as they were. Reached only
+ * through MoveToBAT, GetBATs and StoreBATs, whose caller is myChangeMMU's draft behind its stub
+ * (17.13b's ChangeMMU is a stub too, ppcfunctions.p:8165).
+ */
 void mvtoBAT0(struct BATArray*)
         ="\tlwz\tr4,0(r3)\n\
           \tmtibatu\t0,r4\n\
           \tlwz\tr4,4(r3)\n\
-          \tmtibatu\t0,r4\n\
+          \tmtibatl\t0,r4\n\
           \tlwz\tr4,8(r3)\n\
-          \tmtibatu\t0,r4\n\
+          \tmtdbatu\t0,r4\n\
           \tlwz\tr4,12(r3)\n\
-          \tmtibatu\t0,r4\n";
+          \tmtdbatl\t0,r4\n";
 
 void mvtoBAT1(struct BATArray*)
         ="\tlwz\tr4,0(r3)\n\
           \tmtibatu\t1,r4\n\
           \tlwz\tr4,4(r3)\n\
-          \tmtibatu\t1,r4\n\
+          \tmtibatl\t1,r4\n\
           \tlwz\tr4,8(r3)\n\
-          \tmtibatu\t1,r4\n\
+          \tmtdbatu\t1,r4\n\
           \tlwz\tr4,12(r3)\n\
-          \tmtibatu\t1,r4\n";
+          \tmtdbatl\t1,r4\n";
 
 void mvtoBAT2(struct BATArray*)
         ="\tlwz\tr4,0(r3)\n\
           \tmtibatu\t2,r4\n\
           \tlwz\tr4,4(r3)\n\
-          \tmtibatu\t2,r4\n\
+          \tmtibatl\t2,r4\n\
           \tlwz\tr4,8(r3)\n\
-          \tmtibatu\t2,r4\n\
+          \tmtdbatu\t2,r4\n\
           \tlwz\tr4,12(r3)\n\
-          \tmtibatu\t2,r4\n";
+          \tmtdbatl\t2,r4\n";
 
 void mvtoBAT3(struct BATArray*)
         ="\tlwz\tr4,0(r3)\n\
           \tmtibatu\t3,r4\n\
           \tlwz\tr4,4(r3)\n\
-          \tmtibatu\t3,r4\n\
+          \tmtibatl\t3,r4\n\
           \tlwz\tr4,8(r3)\n\
-          \tmtibatu\t3,r4\n\
+          \tmtdbatu\t3,r4\n\
           \tlwz\tr4,12(r3)\n\
-          \tmtibatu\t3,r4\n";
+          \tmtdbatl\t3,r4\n";
 
 LONG myRun68K(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct PPCArgs* PPStruct);
 LONG myCRun68K(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct PPCArgs* PPStruct);

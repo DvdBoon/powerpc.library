@@ -1047,7 +1047,19 @@ PPCFUNCTION void TaskCheck(__reg("r3") struct PrivatePPCBase* PowerPCBase)
             currWTask->tp_Task.tc_State = TS_READY;
             RemovePPC((struct Node*)currWTask);
             //AddTailPPC((struct List*)&PowerPCBase->pp_ReadyTasks, (struct Node*)currWTask); //Enqueue on pri?
-            EnqueuePPC((struct List*)&PowerPCBase->pp_ReadyTasks, (struct Node*)currWTask);
+
+            /*
+             * T9, REVIEW-LIB.md: THE WOKEN TASK GOES IN BY EFFECTIVE PRIORITY, as every other
+             * insertion into pp_ReadyTasks does: SwitchPPC with priInsert (below) and CreateTaskPPC,
+             * SignalPPC and SetTaskPriPPC through InsertOnPri. EnqueuePPC sorts on ln_Pri, which the
+             * priority rule does not write, so a task that had used little CPU went behind every
+             * ready task of its ln_Pri, and the scheduler, which looks at the head only, ran those
+             * first: the delay was a quantum for each ready task ahead of it. WarpOS wakes with
+             * EnqueueTask under NEWSCHEDULER (powerpc.p:4515-4526), which orders by dynamic priority
+             * and applies the ceiling (:3047-3109); 17.13b appends to the tail of the list
+             * (setupppc.p:3256-3264).
+             */
+            priInsert(PowerPCBase, &PowerPCBase->pp_ReadyTasks, currWTask);
         }
         currWTask = nxtWTask;
     }

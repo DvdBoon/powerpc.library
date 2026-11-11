@@ -192,6 +192,9 @@ Scheduler and tasks:
   answered APPACTIVE), as in 17.13b. A task that a 68k program starts with its
   first RunPPC() begins with its time slice set, as under WarpOS (it began
   with 0 until the next statistics pass).
+- A task that wakes from WaitTime() or from a 68k message goes into the ready
+  list by its priority, as under WarpOS; it went behind every ready task of
+  the same priority, so it waited a time slice for each of them.
 - A task switch cancels an lwarx reservation, and tasks start in AltiVec
   non-Java mode (a denormal ended the task).
 - Fixed: task names of 251 characters or more (they froze the machine or wrote
