@@ -459,6 +459,18 @@ What has changed since 17.15:
   another bit, PPF_LINEAR for instance, ran synchronously and a call with a
   stack was let through; the bit is tested now, as in 17.13b and WarpOS, and
   WaitForPPC() with no call out returns PPERR_WAITERR, as they do.
+- The crash report took the crashed task from the PPC's current-task pointer,
+  which is NULL while no task runs: the PPC idle, a machine check taken there,
+  or a fault in the kernel's own code with nobody running. With NULL it read
+  and wrote the PPC's page zero: it printed a word found there as the task
+  name, overwrote a byte of the status word there, and took a task off the task
+  list through a pointer read from there -- in 17.15 always, which stored the
+  memory base into the first word of ExecBase through the proxy and sent the
+  68k's walk of the library list round in circles, and since an earlier change
+  of this release only when that word was not 0. The report tests for a task
+  now: with none, the name and the task address are 0, so the 68k's window says
+  "Kernel Panic!" and nothing is stored through the pointer (17.13b gives the
+  same window and takes a task off its list only when one is running).
 
 What has changed since 17.14:
 

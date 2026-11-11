@@ -3100,9 +3100,44 @@ PPCKERNEL void CommonExcError(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
         return;
     }
 
+    /*
+     * C1: THE TASK IS READ ONCE, AND THERE MAY BE NONE. pp_ThisPPCProc is NULL
+     * while the PPC idles (kernel.s records it at the entry, :309-313, and
+     * takes the idle frame at the exit, :371-379), and a report can come with
+     * nobody running: a machine check taken by the idle loop, or a fault in
+     * kernel code that runs inside an exception with no task current (HaltError
+     * is "mr r0,r3 / .long 0"). The report read the name, stored TS_REMOVED and
+     * the CRASHED flag, and took the removal's address through the NULL
+     * pointer, which is page zero here (BAT0 maps it for the kernel,
+     * setupppc.c:326-329): the name came from 0x0A, a byte went over zp_Status
+     * at 0x0F, 0x8000 was or'ed into 0x6C, and tp_TaskPtr at 0x68 decided the
+     * removal. Until W3 that removal was unconditional, as in 17.15
+     * (src_175/kernel.c:1580-1582): RemovePPC(NULL) read MemBase and ExecBase
+     * from page zero's words 0 and 4 and stored the first into the second's
+     * lib_Node.ln_Succ, through the proxy. Since W3 it is the word at 0x68,
+     * which no code of the library sets: whatever the RAM held at power-up.
+     * With no task the name and the task words are 0 -- the 68k prints "Kernel
+     * Panic!" for a zero name (support68k.c:1314-1317) -- and nothing is stored
+     * through the pointer.
+     * 17.13b reads LN_NAME and stores TS_REMOVED through ThisPPCProc with no
+     * test (setupppc.p:6517-6520, :6659-6662): THIS DIVERGES, no store through
+     * NULL. It zeroes the name for an SRR0 below 0x10000000 (:6522-6528), the
+     * same "Kernel Panic!", and takes a task off the list only in .CheckWait,
+     * which .TrySwitch reaches with ThisPPCProc not 0 (:3678-3679, :3714-3737):
+     * MATCHES for an idle report. WarpOS takes the head of PPC_TASKRUN in each
+     * of its eight crash arms with no test for an empty list (powerpc.p:5880-5882,
+     * :5982-5984 and six more), and a sleep state with an empty run list exists
+     * (:4573-4590): NO COUNTERPART for the test.
+     * NOT DONE: 17.13b then goes to .DoIdle (:4194-4236) and restarts idle. A
+     * fault in kernel code with no task current is a second exception inside
+     * the first, and the idle frame is one fixed address for both
+     * (kernel.s:315-321), which is a different problem. Test: tests/crashtask.
+     */
+    struct TaskPPC* crashTask = PowerPCBase->pp_ThisPPCProc;
+
     ULONG* errorData = (ULONG*)(PowerPCBase->pp_PPCMemBase + (ULONG)(FIFO_END + 0x100));
-    errorData[0]  = (ULONG)PowerPCBase->pp_ThisPPCProc->tp_Task.tc_Node.ln_Name;
-    errorData[1]  = (ULONG)PowerPCBase->pp_ThisPPCProc;
+    errorData[0]  = (crashTask) ? (ULONG)crashTask->tp_Task.tc_Node.ln_Name : 0;
+    errorData[1]  = (ULONG)crashTask;
     errorData[2]  = iframe->if_ExcNum;
     errorData[3]  = iframe->if_Context.ec_UPC.ec_SRR0;
     errorData[4]  = iframe->if_Context.ec_SRR1;
@@ -3173,25 +3208,28 @@ PPCKERNEL void CommonExcError(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
     myFrame->mf_Identifier = ID_CRSH;
     KSendMsgFramePPC(PowerPCBase, myFrame);
 
-    PowerPCBase->pp_ThisPPCProc->tp_Task.tc_State = TS_REMOVED;
-    PowerPCBase->pp_ThisPPCProc->tp_Flags |= TASKPPCF_CRASHED;
-    /*
-     * OFF THE TASK LIST ONCE (W3, REVIEW-LIB.md). The crashed task leaves
-     * pp_AllTasks here and is counted out here, and tp_TaskPtr is cleared:
-     * the DeleteTaskPPC that Kryten (supportppc.c SystemStart) or its parent
-     * runs on it later must not remove it again through its stale links --
-     * that cut out whatever task had been added after it -- nor count it
-     * out twice. A crashed 68k-started task, which Kryten frees without
-     * DeleteTaskPPC, was never counted out at all. WarpOS keeps a crashed
-     * task in the list, waiting for ever until its parent deletes it
-     * (powerpc.p:7960-7973); the user chose 17.15's automatic cleanup, done
-     * once: THIS DIVERGES. Test: tests/crashtask.
-     */
-    if (PowerPCBase->pp_ThisPPCProc->tp_TaskPtr)
+    if (crashTask)          //C1: with no task there is nothing to tear down
     {
-        RemovePPC((struct Node*)PowerPCBase->pp_ThisPPCProc->tp_TaskPtr);
-        PowerPCBase->pp_ThisPPCProc->tp_TaskPtr = NULL;
-        PowerPCBase->pp_NumAllTasks -= 1;
+        crashTask->tp_Task.tc_State = TS_REMOVED;
+        crashTask->tp_Flags |= TASKPPCF_CRASHED;
+        /*
+         * OFF THE TASK LIST ONCE (W3, REVIEW-LIB.md). The crashed task leaves
+         * pp_AllTasks here and is counted out here, and tp_TaskPtr is cleared:
+         * the DeleteTaskPPC that Kryten (supportppc.c SystemStart) or its parent
+         * runs on it later must not remove it again through its stale links --
+         * that cut out whatever task had been added after it -- nor count it
+         * out twice. A crashed 68k-started task, which Kryten frees without
+         * DeleteTaskPPC, was never counted out at all. WarpOS keeps a crashed
+         * task in the list, waiting for ever until its parent deletes it
+         * (powerpc.p:7960-7973); the user chose 17.15's automatic cleanup, done
+         * once: THIS DIVERGES. Test: tests/crashtask.
+         */
+        if (crashTask->tp_TaskPtr)
+        {
+            RemovePPC((struct Node*)crashTask->tp_TaskPtr);
+            crashTask->tp_TaskPtr = NULL;
+            PowerPCBase->pp_NumAllTasks -= 1;
+        }
     }
     SwitchPPC(PowerPCBase, iframe);
 }
