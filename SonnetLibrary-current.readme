@@ -464,6 +464,12 @@ What has changed since 17.15:
   now: with none, the name and the task address are 0, so the 68k's window says
   "Kernel Panic!" and nothing is stored through the pointer (17.13b gives the
   same window and takes a task off its list only when one is running).
+- InsertPPC() with the tail marker of a list as the predecessor, which puts the
+  node before the marker, did not set the node's back link: the node kept the
+  one it came with (0 for a cleared allocation, a pointer into another list for
+  a node that had been in one), so RemovePPC(), RemTailPPC() and a walk back
+  from the last node of the list went through it. The back link is set now,
+  with the same stores as 17.13b and WarpOS; 17.15 had lost one of them.
 
 What has changed since 17.14:
 

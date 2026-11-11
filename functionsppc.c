@@ -1408,9 +1408,23 @@ PPCFUNCTION VOID myInsertPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __r
 		return;
 	}
 
+	/*
+	 * E7: THE TAIL BRANCH SETS THE NODE'S BACK LINK. A pred with no successor
+	 * is the list's tail marker, &lh_Tail, and the node goes before it:
+	 * node->ln_Succ is the marker, node->ln_Pred is the node that was last,
+	 * and that node and the marker point back at it. This branch stored all of
+	 * that but node->ln_Pred, so the node kept the back link it came with (0
+	 * from a cleared allocation, a pointer into another list for a node that
+	 * had been in one), and RemovePPC, RemTailPPC and a walk back from
+	 * lh_TailPred went through it. 17.13b sets it ("lwz r3,4(r6) / stw r3,4(r5)",
+	 * ppcfunctions.p:579-583) and so does WarpOS (.insert_tail, "stw r3,LN_PRED(r5)",
+	 * powerpc.p:10265), in the same order of stores: THIS MATCHES BOTH. The
+	 * omission is 17.15's C port. Test: tests/insertppc.
+	 */
 	struct Node* predPred = pred->ln_Pred;
 
 	node->ln_Succ = pred;
+	node->ln_Pred = predPred;
 	pred->ln_Pred = node;
 	predPred->ln_Succ = node;
 
