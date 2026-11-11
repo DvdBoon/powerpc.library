@@ -230,7 +230,17 @@ LIBFUNC68K LONG myCRunPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __reg(
 
     if ((PPStruct->PP_Stack) && (PPStruct->PP_StackSize))
     {
-        if (PPStruct->PP_Flags == PPF_ASYNC)
+        /*
+         * M6: PP_FLAGS IS A BITMASK, TESTED BY BIT. This and the async test
+         * after SendMsgFrame compared it with PPF_ASYNC as a value, so
+         * PPF_ASYNC with PPF_LINEAR, or any other bit beside it, was taken for
+         * a call that waits: it ran synchronously, WaitForPPC then found
+         * nothing out, and a stack was let through. The autodoc says the flags
+         * "can be ore'd together" (powerpc.doc:530) and 17.13b tests the bit,
+         * "btst #PPB_ASYNC" (powerpc.s:3760-3762). WarpOS documents the stack
+         * refusal (powerpc.doc:578-580) and enforces it nowhere. tests/runppc68k.
+         */
+        if (PPStruct->PP_Flags & PPF_ASYNC)
         {
             return (PPERR_MISCERR);
         }
@@ -369,7 +379,7 @@ LIBFUNC68K LONG myCRunPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __reg(
 
     SendMsgFrame(PowerPCBase, myFrame);
 
-    if (PPStruct->PP_Flags == PPF_ASYNC)
+    if (PPStruct->PP_Flags & PPF_ASYNC)     //M6: a bit, as the stack test above
     {
         myMirror->mt_Flags = PPStruct->PP_Flags;
         return (PPERR_SUCCESS);
@@ -412,7 +422,17 @@ LIBFUNC68K LONG myWaitForPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __r
             }
             else
             {
-                return (PPERR_ASYNCERR);
+                /*
+                 * M6: WAITERR, NOT ASYNCERR. A WaitForPPC with no asynchronous
+                 * call out is PPERR_WAITERR, "WaitFor[PPC/68K] after synchron
+                 * call" (powerpc.h:102); ASYNCERR is the other way round, a
+                 * synchronous call after an asynchronous one (:101), which
+                 * myCRunPPC gives. 17.13b answers WAITERR for a task with no
+                 * entry and for one with no call out (powerpc.s:3824-3825,
+                 * :3834-3837); WarpOS answers it for both as well
+                 * (powerpc.s:951-952, :957-959, :970). tests/runppc68k.
+                 */
+                return (PPERR_WAITERR);
             }
 
             /*
@@ -659,7 +679,7 @@ LIBFUNC68K LONG myWaitForPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __r
         }
         myMirror = nxtMirror;
     }
-    return (PPERR_ASYNCERR);
+    return (PPERR_WAITERR);                 //M6: this task has no entry at all, so no call is out
 }
 
 /********************************************************************************************

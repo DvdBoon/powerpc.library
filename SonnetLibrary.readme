@@ -444,6 +444,21 @@ What has changed since 17.15:
   are emulated, and a misaligned lwarx or stwcx. is no longer taken for a float
   access: it goes to the task's exception handlers, as in WarpOS. The code that
   runs a SMALLCONTEXT exception handler now keeps its caller's r13.
+- SetExcHandler() and RemExcHandler() queue their changes for the decrementer
+  exception to move into the exception lists. The exception moved them before
+  it checked that it had not interrupted one of the list functions, so one that
+  landed between the stores of an insertion could move a node whose links were
+  not written yet; it looks first now (17.13b has the old order, WarpOS makes
+  the insertion under Forbid). A load from Amiga memory that a PPC program made
+  through the exception handler waited for the 68k for ever when the 68k did
+  not answer, inside Disable() for instance; the wait ends after 2 seconds now
+  and the load is refused like any other memory error (the task's exception
+  handlers run, or the task ends with the crash window, which says "PPC timed
+  out while waiting on 68K"; 17.13b ends the wait after a count of its own and
+  does the same). RunPPC() took PP_Flags as a value, so PPF_ASYNC together with
+  another bit, PPF_LINEAR for instance, ran synchronously and a call with a
+  stack was let through; the bit is tested now, as in 17.13b and WarpOS, and
+  WaitForPPC() with no call out returns PPERR_WAITERR, as they do.
 
 What has changed since 17.14:
 

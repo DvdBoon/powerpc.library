@@ -103,6 +103,16 @@
  */
 #define MINDEC                  100         /* :31                         */
 
+/*
+ * Q3: HOW LONG THE DSI PROXY WAITS FOR THE 68k'S ANSWER TO A LOAD, in seconds
+ * of timebase (kernel.c). The timebase runs at pp_BusClock / 4 (myGetSysTimePPC),
+ * so the wait is (pp_BusClock >> 2) * PROXY_WAIT_SECONDS ticks, on every card
+ * the same time. The fastest, BUSCLOCK_E300, gives 66.7 million ticks a second,
+ * so any value up to 64 fits a ULONG. 17.13b waits for 0x400000 polls and then
+ * gives up (setupppc.p:5869-5881), which is a different time on every CPU.
+ */
+#define PROXY_WAIT_SECONDS      2
+
 #define PPERR_MISCERR           3
 
 #define CPUF_7410               0x00800000

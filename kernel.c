@@ -409,6 +409,49 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                 iframe->if_Context.ec_ExcID = EXCF_DECREMENTER;
             }
 
+            CPUStats(PowerPCBase);
+
+            ULONG currAddress = iframe->if_Context.ec_UPC.ec_SRR0;
+            if ((PowerPCBase->pp_LowerLimit <= currAddress) && (currAddress < PowerPCBase->pp_UpperLimit))
+            {
+                PowerPCBase->pp_Quantum = 0x1000;
+                break;
+            }
+
+            /*
+             * T6: THE TWO MOVES BELOW COME AFTER THE WINDOW TEST ABOVE. The
+             * moves are not interrupted themselves (an exception runs with
+             * EE off); what was not protected is the code they interrupt.
+             * LinkExcList (supportppc.c, one insert per entry of a
+             * SetExcHandler) and RemExcHandler (functionsppc.c) put an entry
+             * on pp_ReadyExc or pp_RemovedExc with myAddHeadPPC, in user mode
+             * with EE on, under pp_Mutex. As written, myAddHeadPPC points the
+             * list head at the new node BEFORE it sets the node's own links
+             * (functionsppc.c). pp_Mutex is a flag and not an interrupt mask:
+             * this arm tests it below, to keep a task switch away, after these
+             * loops. So a decrementer that landed between those stores ran the
+             * loops on a list whose head was a node with no links yet, and
+             * RemHeadPPC followed them. The window above is the code between
+             * the jump-table targets of InsertPPC and FindNamePPC
+             * (pp_LowerLimit and pp_UpperLimit, setupppc.c), which holds
+             * myAddHeadPPC: it is how this arm tells that the interrupted
+             * code is inside a list function, and the loops ran ahead of it.
+             * A caller outside the window has its entries moved at this tick,
+             * as before; one inside it at the next, 0x1000 timebase ticks on
+             * (the quantum set above). The moves stay AHEAD of the mutex and
+             * Forbid test below, so that a SetExcHandler or RemExcHandler that
+             * holds pp_Mutex, or runs under Forbid, still has its entries
+             * moved and its wait for EXCF_ACTIVE ends.
+             * 17.13b has the same order and the same exposure: its AddHeadPPC
+             * stores the head first (ppcfunctions.p:598-603) and its moves
+             * (setupppc.p:4316 and :4423) come before .StartQ (:2766-2780), which
+             * loads the atomic flag (:2768) and the window limits (:2774, :2778);
+             * a search of the whole 17.13b tree finds no other load of either,
+             * and every other use of the flag is a lock or unlock call
+             * (ppcfunctions.p, 90 sites, AtomicTest and AtomicDone). WarpOS
+             * tests FORBID first (powerpc.p:4187-4220) and inserts under FORBID
+             * (powerpc.p:11425-11428, :11480-11484). tests/excstage.
+             */
             struct ExcData* eData;
 
             while (eData = (struct ExcData*)RemHeadPPC((struct List*)&PowerPCBase->pp_ReadyExc))
@@ -454,15 +497,6 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                 }
                 struct ExcData* lastExc = eData->ed_LastExc;
                 lastExc->ed_Flags &= ~EXCF_ACTIVE;
-            }
-
-            CPUStats(PowerPCBase);
-
-            ULONG currAddress = iframe->if_Context.ec_UPC.ec_SRR0;
-            if ((PowerPCBase->pp_LowerLimit <= currAddress) && (currAddress < PowerPCBase->pp_UpperLimit))
-            {
-                PowerPCBase->pp_Quantum = 0x1000;
-                break;
             }
 
             if ((PowerPCBase->pp_Mutex) || (PowerPCBase->pp_FlagForbid))
@@ -530,25 +564,67 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                         myFrame->mf_Arg[1] = myData.dm_Address;
                         myFrame->mf_Arg[0] = myData.dm_Value;
                         KSendMsgFramePPC(PowerPCBase, myFrame);
+
+                        ULONG answered = 1;
+
                         if (!(myData.dm_LoadFlag))
                         {
-                            while (myFrame->mf_Identifier != ID_DONE);
-#ifdef DEBUG
-                            if (myFrame->mf_Arg[0] == ERR_EMEM)
+                            /*
+                             * Q3: THE WAIT FOR THE 68k'S ANSWER TO A LOAD ENDS. This was
+                             * the bare loop "while (mf_Identifier != ID_DONE);", so a 68k
+                             * that did not answer -- inside Disable() for seconds, or with
+                             * the message lost -- held this CPU here with EE off: no
+                             * decrementer, no other task, and nothing to say why. It is now
+                             * bounded by the timebase, PROXY_WAIT_SECONDS (constants.h),
+                             * the same time on every card; 17.13b bounds it by a count,
+                             * 0x400000 polls, a different time on every CPU
+                             * (setupppc.p:5869-5881). On expiry the load is refused as
+                             * 17.13b refuses it: 'ETIM' (0x4554494D) goes in the saved r0,
+                             * which the crash window prints, and the code falls out of this
+                             * block to the tail below -- the task's DACCESS handlers when
+                             * EnMemExc is 0, then CommonExcError -- where it used to add 4
+                             * to SRR0 and go on. The message frame stays with the 68k,
+                             * which answers it and frees it whenever it gets to the message
+                             * (support68k.c, ID_GETV). A frame the 68k has already freed
+                             * (ID_FREE written over ID_DONE) before the poll saw ID_DONE
+                             * ends here the same way; tests/proxytime floods loads to see
+                             * whether a healthy machine ever gets here. WarpOS has no
+                             * proxy: it reaches Amiga memory itself.
+                             */
+                            ULONG waitStart = getTBL();
+                            ULONG waitTicks = (PowerPCBase->pp_BusClock >> 2) * PROXY_WAIT_SECONDS;
+
+                            while ((myFrame->mf_Identifier != ID_DONE) && ((getTBL() - waitStart) < waitTicks))
                             {
-                                CommonExcError(PowerPCBase, iframe);
-                                break;
                             }
-#endif
-                            if (!(FinDataStore(myFrame->mf_Arg[0], iframe, iframe->if_Context.ec_UPC.ec_SRR0, &myData)))
+
+                            if (myFrame->mf_Identifier != ID_DONE)
                             {
-                                CommonExcError(PowerPCBase, iframe);
-                                break;
+                                iframe->if_Context.ec_GPR[0] = 0x4554494D;      //'ETIM', as 17.13b
+                                answered = 0;
+                            }
+                            else
+                            {
+#ifdef DEBUG
+                                if (myFrame->mf_Arg[0] == ERR_EMEM)
+                                {
+                                    CommonExcError(PowerPCBase, iframe);
+                                    break;
+                                }
+#endif
+                                if (!(FinDataStore(myFrame->mf_Arg[0], iframe, iframe->if_Context.ec_UPC.ec_SRR0, &myData)))
+                                {
+                                    CommonExcError(PowerPCBase, iframe);
+                                    break;
+                                }
                             }
                         }
-                        iframe->if_Context.ec_UPC.ec_SRR0  += 4;
-                        //PowerPCBase->pp_Quantum = getDEC() + 1000; //Do not start quantum all over
-                        break;
+                        if (answered)
+                        {
+                            iframe->if_Context.ec_UPC.ec_SRR0  += 4;
+                            //PowerPCBase->pp_Quantum = getDEC() + 1000; //Do not start quantum all over
+                            break;
+                        }
                     }
                 }
             }
