@@ -1759,6 +1759,18 @@ PPCKERNEL void DispatchPPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
 
     newTask->nt_Task.pt_Task.tp_Id = PowerPCBase->pp_IdUsrTasks;
     newTask->nt_Task.pt_Task.tp_PowerPCBase = PowerPCBase;
+
+    /*
+     * T12, REVIEW-LIB.md: THE NEW TASK GETS A QUANTUM. The 68k side zeroes this block
+     * (myCRunPPC, functions68k.c) and CreateTaskPPC stores pp_StdQuantum in the field
+     * (functionsppc.c), but this path stored none, so a task started by a 68k program's first
+     * RunPPC kept 0 until CPUStats' next pass that sets quanta, up to 24 passes: the decrementer
+     * arm skips a task whose quantum is 0 and priShouldSwitch reads its slice as used at once.
+     * WarpOS stores RESCH_NEWTASK in every task it makes (powerpc.p:9328) and 17.13b stores
+     * sonnet_Quantum (ppcfunctions.p:5284-5285), both in the task's own creation.
+     */
+    newTask->nt_Task.pt_Task.tp_Quantum = PowerPCBase->pp_StdQuantum;
+
     newTask->nt_Task.pt_Task.tp_Task.tc_Node.ln_Type = NT_PPCTASK;
     newTask->nt_Task.pt_Task.tp_Task.tc_State = TS_RUN;
     newTask->nt_Task.pt_Task.tp_ContextMem = &newTask->nt_Context;

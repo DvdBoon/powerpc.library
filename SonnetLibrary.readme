@@ -178,369 +178,210 @@ It was a fun 9 year ride and thanks for your support! :-)
 
 What has changed since 17.15:
 
-- Added the ENV option ReportG4asG3. See above.
-- The ENV option SetCMemDiv was read but did nothing. Fixed. See above.
-- The ENV option EnMemExc replaces EnAlignExc and EnDAccessExc. See above.
-- Data Access (DSI) handlers can now claim a fault. Without EnMemExc they
-  now also get the faults the 68K memory access cannot serve, as in 17.13b.
-- Task priorities had no effect: tasks simply took turns. Added the WarpOS
-  priority scheduler (NEWPRIRULE), with NICE values and a time slice per task
-  that scales with the load.
-- Every exception restarted the time slice. The decrementer is now only set
-  after a decrementer or external interrupt, as in WarpOS.
-- Timed exception handlers (EXCATTR_TIME) could run up to 20 ms late. Fixed.
-- Exceptions now run under the library's own MMU set-up. A task's own BATs,
-  segment registers and page table are restored on exit.
-- The kernel now handles exceptions on its own stack, and exception handlers
-  get the full exception frame.
-- Fixed several bugs in calling exception handlers with a small context.
-- XCO_EXCID and XCO_R3 of the XCONTEXT structure were swapped. Fixed.
-- The kernel no longer dereferences a null or misaligned r3 on a system call
-  (sc) exception; such calls go to the registered handlers.
-- The tc_Switch and tc_Launch task hooks are now called.
-- Fixed the per-task CPU usage figures.
-- Reworked the signal relay between PPC tasks and their 68k mirror tasks.
-  Signals were lost or stranded, and signal bit 31 was stripped. Fixed.
-- SignalPPC() to a 68k process (rather than a task) did nothing. Fixed.
-- A task created with CreateTaskPPC() could hang in its first Run68K(), in a
-  race while its 68k mirror task was set up. Fixed.
-- WaitTime() cleared signals 0-9 as well as its own, in the task and in its
-  result. TrySemaphorePPC() could then fail after it had been given the
-  semaphore. Fixed.
-- 68k tasks lost bits 0 and 1 of tc_Flags when the library cleared its own
-  flag. Fixed.
-- The Harrier start-up switched off copy-back snarfing (BXCS bit CSE) when it
-  started the CPU. This hung a G4 (seen with ScummVM and GLQuake). Fixed.
-- Every exception emptied the PPC instruction cache, which made exceptions
-  about three times slower on a G4 (the G4's L2 cache is not on the chip).
-  The cache is now only emptied when another task gets the CPU.
-- With SetCPUComm set, hunks that asked for FAST or CHIP memory were not
-  loaded into Amiga memory. Fixed.
-- A 68k mirror task freed a borrowed current directory lock (e.g. the Shell's)
-  on exit. Fixed.
-- The dummy warp.library (now 5.2) is built in PPC memory, so PPC code can
-  call it.
-- Tasks created with TASKATTR_BAT started with all four BATs cleared. They
-  now get the system BATs like any other task.
-- GetInfo() GETINFO_CPU on Harrier and MPC107 boards now answers from the
-  CPU itself for every CPU, as 17.13b did. Before, the Harrier answered only
-  a 750FX or 7410, and the MPC107 called a 745x a G3.
-- Super() is now recognised by its address, as in WarpOS. Before, any
-  program exception with 0xABADBEEF in r4 switched the task to supervisor
-  mode.
-- K1/M1 (PCI): the memory of a second graphics card (a Radeon, with a Voodoo
-  as primary card) is usable by the PPC again, as in 17.13b.
-- ReplyMsgPPC() marks every reply NT_REPLYMSG. Before, only a reply to a
-  68k message was marked.
-- A SignalPPC() that hit a task's exception signals (tc_SigExcept) hung the
-  sending task. Fixed.
-- PutMsgPPC(), ReplyMsgPPC() and SignalPPC() can now be called from
-  exception handlers, as WarpOS documents. Before, they could hang the PPC.
-- ReleaseSemaphorePPC(), handing a semaphore to tasks waiting for shared
-  access, could take the end of the wait queue for a waiter and corrupt the
-  semaphore, and read a waiter's data after waking it. A shared request
-  made with ProcurePPC() kept the shared waiters behind it waiting. Fixed.
-- ProcurePPC() could leave a semaphore's owner unset and its queue count
-  wrong, granted an exclusive request to a semaphore held shared, and
-  queued the owner's own nested request behind itself. VacatePPC() left a
-  shared request's message changed, so using it again could crash. Fixed.
-- ReleaseSemaphorePPC() freed its lock before it named the next owner, so
-  a shared request arriving in that moment was granted while an exclusive
-  waiter was being given the semaphore. The hand-off now completes under
-  the lock. WarpOS and 17.13b have the same window.
-- CreateTaskPPC() left TASKPPCF_CHOWN set on the calling task when it
-  failed. Fixed.
-- A task created with TASKATTR_ATOMIC was still switched out like any
-  other task. It now keeps the CPU until it waits or ends, as in WarpOS.
-- TrySemaphorePPC() did not count a semaphore it got at once (free, or
-  already held by the caller), so the matching ReleaseSemaphorePPC()
-  stopped the task with "PPC Semaphore in illegal state". Fixed, as in
-  WarpOS.
-- A signal sent to a CreateTaskPPC() task during its first Run68K() was
-  lost, so a later WaitPPC() on it could hang. It is now kept and handed
-  back when the call returns.
-- SetSignalPPC() returned the old signals with the changed bits cleared,
-  so SetSignalPPC(0, mask) & mask -- the usual test for Ctrl-C -- was
-  always 0. Fixed, as in WarpOS.
-- A SMALLCONTEXT exception handler wrote below the task's exception frame.
-  The task lost its link to its 68k mirror, so signals forwarded from the
-  68k side, Ctrl-C included, were lost from then on. Fixed.
-- A signal relayed to a task's 68k mirror read the mirror's address from
-  Amiga memory every time. It is now read on the PPC side, as in WarpOS.
-- SetCache(), Signal68K() and a reply to a 68k message hung or crashed the
-  PPC when called from an exception handler: they trapped into the kernel a
-  second time. From a handler they now call the kernel directly, as
-  WarpOS's SetCache does. An exception handler must not read or write
-  Amiga memory.
-- RunPPC() and WaitForPPC() handed the PPCArgs structure back with
-  PP_Code, PP_Offset, PP_Flags, PP_Stack and PP_StackSize cleared, so a
-  structure used for a second call crashed the PPC. Only the registers
-  come back now, and the structure is otherwise left as it was, as in
-  WarpOS.
-- Floating-point loads and stores with an index register (lfsx, lfdx,
-  stfsx, stfdx), and lmw/stmw, on Amiga memory were emulated as integer
-  accesses: they changed the wrong register or wrote the wrong data. They
-  are now refused like the other floating-point accesses there: the
-  task's exception handlers, then a crash report.
-- When it refused to start (a 68030, another PPC library already
-  running, no supported PCI bridge, a missing pci.library or
-  prometheus.library), the library could crash the machine after its
-  error requester: it closed libraries it had never opened. It now closes
-  only those it opened, and a prometheus.library too old to use is no
-  longer left open.
-- CreateMsgPortPPC() returned a freed or half-made port when it failed
-  (no free signal, or no memory). It now returns NULL and gives back what
-  it took, as in WarpOS.
+ENV options (see above):
+- Added ReportG4asG3. EnMemExc replaces EnAlignExc and EnDAccessExc.
+  SetCMemDiv was read but did nothing; it works now.
+
+Scheduler and tasks:
+- Task priorities work now: the WarpOS priority scheduler (NEWPRIRULE) with
+  NICE values and a time slice per task that scales with the load.
+- Exceptions no longer restart the time slice or empty the instruction cache
+  unless another task gets the CPU (they were about three times slower on a
+  G4).
+- The tc_Switch and tc_Launch hooks are called, the per-task CPU usage is
+  right, TASKATTR_BAT tasks get the system BATs and TASKATTR_ATOMIC tasks keep
+  the CPU until they wait or end, as in WarpOS.
+- SetScheduling() compares SCHED_REACTION as a signed number (-1 gave 20, the
+  widest ceiling, and gives 1 now, as in 17.13b and WarpOS). SnoopTask()
+  refuses a type other than SNOOP_START and SNOOP_EXIT instead of returning an
+  ID for it, as in both.
+- GetPPCState() answers PPCSTATEF_APPRUNNING while a task is ready to run (it
+  answered APPACTIVE), as in 17.13b. A task that a 68k program starts with its
+  first RunPPC() begins with its time slice set, as under WarpOS (it began
+  with 0 until the next statistics pass).
+- A task switch cancels an lwarx reservation, and tasks start in AltiVec
+  non-Java mode (a denormal ended the task).
+- Fixed: task names of 251 characters or more (they froze the machine or wrote
+  past a buffer); a failed start of a task's 68k side for want of memory (an
+  endless wait; it is tried again every second now).
+- Fixed: a crashed task taken off the task list and its port freed twice
+  (often halting the machine); a task deleted in WaitTime() left its timer
+  behind; a message for a task being removed woke it again.
+- Fixed: a failed CreateTaskPPC() left TASKPPCF_CHOWN set; 1 KB of every
+  CreateTaskPPC() task was never given back. TASKATTR_NOTIFYMSG works.
+
+Exceptions:
+- Exceptions run under the library's MMU set-up and on the kernel's own stack,
+  and handlers get the full frame.
+- Timed handlers (EXCATTR_TIME) ran up to 20 ms late. XCO_EXCID and XCO_R3 of
+  XCONTEXT were swapped.
+- A DSI handler can claim a fault, and without EnMemExc also gets the faults
+  the 68K memory access cannot serve, as in 17.13b.
+- A null or misaligned r3 on an sc exception goes to the registered handlers.
+  Super() is recognised by its address, as in WarpOS (any exception with
+  0xABADBEEF in r4 gave supervisor mode).
+- SMALLCONTEXT handlers: several bugs fixed, among them a write below the
+  exception frame that cost the task its link to its 68k mirror (signals from
+  the 68k, Ctrl-C included, were lost), and the caller's r13 is kept.
+- A SetExceptPPC() handler runs whenever the task has one, with the data
+  whatever it holds (it needed non-zero data; a task with data and no handler
+  made the kernel call address 0).
+- SetExcHandler(): a failed call left a freed handler active, a type the
+  library does not handle (EXCF_ALTIVECUNAV alone) stopped the program (it
+  gets a handle now, which RemExcHandler() frees), and queued changes could be
+  moved while a list function was half done.
+- CauseInterrupt() runs the EXCF_INTERRUPT handlers before it returns, as
+  under WarpOS; CausePPCInterrupt() from a 68k program works on a Harrier.
+- From an exception handler, SetCache(), Signal68K() and a reply to a 68k
+  message hung or crashed the PPC; they call the kernel directly now, as
+  WarpOS's SetCache does.
+- PutMsgPPC(), ReplyMsgPPC() and SignalPPC() can be called from handlers, as
+  WarpOS documents. A handler must not read or write Amiga memory.
+- A PPC program's load from Amiga memory (through the library's exception
+  handler) waited for ever when the 68k did not answer; it is refused after 2
+  seconds now, like any memory error.
+- The crash report no longer reads or writes the PPC's page zero when no task
+  runs: it shows "Kernel Panic!" (it could send the 68k's walk of the library
+  list round in circles).
+
+Signals and the 68k mirror task:
+- The signal relay between a PPC task and its 68k mirror task was reworked
+  (signals were lost or stranded, bit 31 was stripped), and the mirror's
+  address is read on the PPC side, as in WarpOS.
+- SignalPPC() to a 68k process works. A signal sent during a CreateTaskPPC()
+  task's first Run68K() is kept now, and a race in that call that could hang
+  the task is fixed.
+- A signal pending at RunPPC() was sent twice. A SignalPPC() that hit a task's
+  exception signals hung the sender, and a task that signalled them could hang
+  if an interrupt came at the wrong moment.
+- WaitTime() cleared signals 0-9 as well as its own (TrySemaphorePPC() then
+  failed after it had got the semaphore). SetSignalPPC() returned the old
+  signals with the changed bits cleared, so SetSignalPPC(0, mask) & mask, the
+  usual test for Ctrl-C, was always 0 (as in WarpOS now).
+- The process that stands for a PPC task waits for MasterControl's signal
+  before it makes its message port, so the port cannot share signal bit 31
+  with the task (a signal on it was dropped for the life of the pair).
+- A 68k mirror task no longer frees a borrowed current directory lock on exit,
+  and 68k tasks no longer lose bits 0 and 1 of tc_Flags.
+
+Semaphores:
+- ReleaseSemaphorePPC(), ProcurePPC(), VacatePPC(), TrySemaphorePPC() and
+  ObtainSemaphoreSharedPPC() could corrupt a semaphore or its wait queue, lose
+  the owner or a count, grant an exclusive request to a semaphore held shared,
+  stop a task with "PPC Semaphore in illegal state", leave a semaphore held,
+  freeze the PPC, crash when a request was used again, or leave a task asleep
+  for good; all fixed.
+- The hand-off in ReleaseSemaphorePPC() completes under the lock (WarpOS and
+  17.13b have the same window), and ObtainSemaphoreSharedPPC() raises the nest
+  count before it releases the lock, which 17.13b and WarpOS do the other way
+  round: this release differs from them on purpose there (ObtainSemaphorePPC()
+  keeps their order).
+
+RunPPC(), Run68K() and the 68k side:
+- RunPPC() and WaitForPPC() hand back the registers and leave the PPCArgs
+  structure as it was (a second call with it crashed the PPC), RunPPC() tests
+  PPF_ASYNC as a bit, and WaitForPPC() with no call out returns PPERR_WAITERR
+  and no longer raises a negative priority to 0, as in WarpOS.
+- A function started with RunPPC() gets a 32-byte aligned stack (AltiVec code
+  on the stack read wrong bytes), and a failed first RunPPC() leaves nothing
+  behind (the next one built a PPC task at a random address).
+- Run68K() with PPF_ASYNC works (collected with WaitFor68K()), a missing code
+  address returns PPERR_MISCERR, and the 68k function's a6 is stored in the
+  right place afterwards.
+- The 68k side searches its list of the processes that have used RunPPC() with
+  task switching forbidden, as WarpOS does (17.13b searches without a lock): a
+  task switched out in the search could follow freed memory (a bus error or a
+  Guru) or build a second PPC task for its caller.
+
+Messages, pools and memory calls:
 - A long run of PPC writes to Amiga memory, or debug output, could reuse a
-  message frame that was still in use, losing a write or corrupting
-  memory. The PPC now waits for a free frame, and the 68k side never takes
-  an empty queue for a frame.
-- SetCache() on memory the PPC cannot reach, such as Amiga fast RAM or the
-  ROM, killed the calling task and slowed every later exception; on a chip
-  RAM address an invalidate could damage the library's own memory. It now
-  acts only on memory the PPC can cache.
-- prometheus.library is now tried before pci.library: with a
-  FireStorm/Firebird board present, that bridge is used; otherwise the
-  Mediator, as before.
-- A function started with RunPPC() from the 68k side could begin with its
-  stack not even 8-byte aligned, so AltiVec code keeping vectors on the
-  stack read and wrote the wrong bytes. Its stack now starts 32-byte
-  aligned, as in WarpOS.
-- The 68k side could freeze the whole machine, with interrupts off, when
-  it read a message from the PPC twice and then found the queue empty.
-  Fixed, as in 17.13b.
-- A PPC task that crashed was taken off the task list twice, which could
-  cut another task out of it, and its port was freed twice if its parent
-  had already deleted it, often halting the machine. A crashed task is now
-  torn down once.
-- A PPC task deleted by another task while it waited in WaitTime() left
-  its timer behind. When the time ran out, the kernel wrote to the
-  deleted task, and into freed memory once the task had been cleaned up.
-  The timer is now removed with the task.
-- A SetExcHandler() that failed could leave a freed handler active, so the
-  next exception of its type called freed memory. The handlers are now
-  handed to the kernel only after every allocation has succeeded, as in
-  WarpOS.
-- The program loader no longer makes an exception for one build of the
-  Radeon driver; that build is now loaded like any program the loader has
-  no exception for.
-- An atomic PPC task waiting in TrySemaphorePPC() froze the PPC when the
-  semaphore was handed to it. And a TrySemaphorePPC() whose time ran out
-  left the semaphore held after its owner let go, so the next task to ask
-  for it waited for ever. Both are fixed.
-- A PPC task with a name of 256 characters or more froze the machine at
-  its first Run68K(), and a name of 251-255 characters wrote past a
-  buffer. When there was too little memory to start the task's 68k side,
-  a requester appeared and the task waited for ever. Names of any length
-  now work, and a failed start is tried again every second.
-- A program whose first RunPPC() failed, for want of memory or because
-  it passed stack arguments with PPF_ASYNC, left a half-made entry
-  behind, and its next RunPPC() had the PPC build a task at a random
-  address, which crashed or froze the machine. A failed first call now
-  leaves nothing behind.
-- When the size of the L2 cache could not be measured at startup, the
-  library took it as 256 MB, and every flush of the whole data cache then
-  crashed the program that asked for it. A failed measurement now gives
-  1 MB, the size the L2 is set to.
-- A PPC task that signalled a task's exception signals could hang for
-  ever if an interrupt came at the wrong moment. Its wait now ends
-  properly.
-- A PPC program that called Run68K() with PPF_ASYNC, or with no code
-  address, was stopped with an error. Asynchronous calls now work as in
-  WarpOS, collected with WaitFor68K(), and a missing code address returns
-  PPERR_MISCERR.
-- A PPC program that called SetExcHandler() with no exception type the
-  library handles (EXCF_ALTIVECUNAV alone, for one) was stopped with an
-  error. It now gets a handle, as in WarpOS, and RemExcHandler() frees it.
-- A PPC program that called AllocPooledPPC() or FreePooledPPC() with no
-  pool was stopped with an error, and every later PPC allocation then
-  hung. Both now return at once, as in WarpOS, and AllocPooledPPC() also
-  returns NULL for a size of 0.
-- A program that freed an XMsg made on the other CPU, with FreeXMsgPPC()
-  or FreeXMsg(), was stopped with an error or corrupted memory. Each now
-  hands it to the side that made it, as in WarpOS, and a PPC XMsg reaches
-  a 68k port with its type, NT_XMSGPPC, as in WarpOS.
-- RawDoFmtPPC() printed every hexadecimal number wrongly, treated a
-  precision as a minimum (printing too much, or bytes past the end of a
-  string), and cut strings of 256 characters or more. All three now work
-  as in WarpOS.
-- AllocPooledPPC() failed for a size close to the pool's puddle size and
-  left an empty puddle behind on every try, and FreePooledPPC() did not
-  always join the freed memory to the free space below it. Such a request
-  now gets its own block, and freed memory joins up as in 17.13b.
-- ChangeStack() returned 1 instead of CHSTACK_SUCCESS, so a program
-  checking for it saw a failure, and a second call could crash the
-  program. It now works as in WarpOS, and a request smaller than the
-  stack succeeds without a change.
-- When the library could not start, it could close other libraries twice
-  behind two requesters, or hang the machine if the ramlib stack could not
-  be enlarged; and on e300 cards a warning closed libraries it still used.
-  Now one requester, each library closed once, the ramlib case goes on as
-  in 17.13b, and the warning closes nothing.
-- The PCIe version of the M1 card (MPC8314E) did not start at all. It now
-  starts and runs PPC programs: it is entered through its external-interrupt
-  vector, and its MMU page table is placed at the top of the card's memory
-  and kept out of the memory pool.
-- SetCache() on a card without an L2 (K1, M1) did not flush or invalidate
-  the range it was given, and Run68K() flushed too few of its stack
-  arguments. Flushing the whole data cache could leave modified lines
-  behind, and with DisL2Flush set, turning the L2 off lost its data. A cache
-  switched back on kept its old lines. All fixed. The Killer's L1 caches are
-  also cleared at start-up.
-- A task switch did not cancel a reservation made by lwarx, so a reservation
-  left by one task could let another task's stwcx. succeed when it should have
-  failed, and an atomic update was lost. The switch now cancels it. A task
-  that began using AltiVec started in Java mode, where vaddfp, vsubfp,
-  vmaddfp and vnmsubfp take an AltiVec Assist exception on a denormal number
-  and the task was ended. Tasks now start in non-Java mode, as the processor
-  does after a reset.
-- A message for a task that was being removed could wake it again, and it
-  then stayed on the CPU for ever instead of being freed (with an atomic
-  task, the whole PPC stopped). It now stays removed. The port of a task
-  made with CreateTaskPPC is freed by the system task that frees the rest of
-  its memory, not by the dying task. TASKATTR_NOTIFYMSG now works: the
-  message you give is sent to its reply port once the task has been removed,
-  which can take a few seconds. About 1 KB of every task made with
-  CreateTaskPPC was never given back; it is now.
-- Every process whose exit routine lay in ROM was given a replacement that
-  handed dos a return code of 0 and left 16 bytes on the stack; it now passes
-  the code on and leaves the stack as it was, as in 17.13b. The patch on
-  AllocMem() had come apart from 17.13b's: it read from address 0xFFFFFFFB
-  for a task without a name, compared the wrong four characters of the name
-  of a task that is not a CLI process (so _PPC, _68K, 2005, sk_0 and sk_1
-  were missed), turned away a request for MEMF_FAST alone, and had lost the
-  AmigaAMP case. All are as in 17.13b again. The loader did not recognise
-  ppc.library or AmigaAMP in a program, lost the memory of an overlaid
-  program it had loaded, and lost a file handle (and a FIB) when the file
-  could not be examined; fixed.
-- WaitForPPC() raised a negative priority of the calling program to 0, for
-  good; the program now keeps the priority it set, as under WarpOS (17.13b
-  lowered a priority of 0 or more to 0 instead). A signal that was pending
-  when a program called RunPPC() was sent to the PPC task, but also stayed
-  with the program and was sent a second time; it is now sent once. When a
-  68k function called with Run68K() returned, its a6 was stored in the wrong
-  place: the PPC program found its own a6 in PP_Regs[14], and on a 68k without
-  a 68040/68060 FPU the upper half of PP_FRegs[2] was overwritten. Fixed.
-- CauseInterrupt() only armed the decrementer, so the exception handlers set
-  for EXCF_INTERRUPT ran only for a real external interrupt. It now runs them
-  before it returns, as under WarpOS. SetHardware(HW_BRANCHTRACEOFF) switched
-  off the single-step bit instead of the branch trace bit, so the branch trace
-  stayed on; fixed. The NICE table was reached through the address the setup
-  code had been started from, which on a Harrier is a boot-time alias in the
-  high vector area; it now sits in the library's own memory, as in 17.13b.
-- CausePPCInterrupt() from a 68k program did nothing on a Harrier: it wrote the
-  message register at the offset the PowerPC sees it at, not the one the PCI bus
-  does, so no interrupt reached the PPC. It now raises the interrupt for the
-  EXCF_INTERRUPT handlers. An external interrupt used to start the whole time
-  slice again, so with the 68k sending interrupts faster than the slice the
-  decrementer never ran out; it now only shortens what is left when the same
-  task keeps running. The Harrier set-up counted 983,299 interrupt
-  acknowledgements at every start where 15 are meant; it counts 15.
-- A floating-point access that is not word-aligned, which a G3 or G4 hands to
-  software, was emulated with the displacement taken as unsigned, so a negative
-  displacement went 64 KB too far and the update forms left a wrong value in the
-  base register; it is signed now. The emulation lacked lfdu, stfdu, lfsux,
-  lfdx, lfdux, stfsux, stfdx, stfdux, stfiwx and dcbz, which WarpOS has; they
-  are emulated, and a misaligned lwarx or stwcx. is no longer taken for a float
-  access: it goes to the task's exception handlers, as in WarpOS. The code that
-  runs a SMALLCONTEXT exception handler now keeps its caller's r13.
-- SetExcHandler() and RemExcHandler() queue their changes for the decrementer
-  exception to move into the exception lists. The exception moved them before
-  it checked that it had not interrupted one of the list functions, so one that
-  landed between the stores of an insertion could move a node whose links were
-  not written yet; it looks first now (17.13b has the old order, WarpOS makes
-  the insertion under Forbid). A load from Amiga memory that a PPC program made
-  through the exception handler waited for the 68k for ever when the 68k did
-  not answer, inside Disable() for instance; the wait ends after 2 seconds now
-  and the load is refused like any other memory error (the task's exception
-  handlers run, or the task ends with the crash window, which says "PPC timed
-  out while waiting on 68K"; 17.13b ends the wait after a count of its own and
-  does the same). RunPPC() took PP_Flags as a value, so PPF_ASYNC together with
-  another bit, PPF_LINEAR for instance, ran synchronously and a call with a
-  stack was let through; the bit is tested now, as in 17.13b and WarpOS, and
-  WaitForPPC() with no call out returns PPERR_WAITERR, as they do.
-- The crash report took the crashed task from the PPC's current-task pointer,
-  which is NULL while no task runs: the PPC idle, a machine check taken there,
-  or a fault in the kernel's own code with nobody running. With NULL it read
-  and wrote the PPC's page zero: it printed a word found there as the task
-  name, overwrote a byte of the status word there, and took a task off the task
-  list through a pointer read from there -- in 17.15 always, which stored the
-  memory base into the first word of ExecBase through the proxy and sent the
-  68k's walk of the library list round in circles, and since an earlier change
-  of this release only when that word was not 0. The report tests for a task
-  now: with none, the name and the task address are 0, so the 68k's window says
-  "Kernel Panic!" and nothing is stored through the pointer (17.13b gives the
-  same window and takes a task off its list only when one is running).
-- InsertPPC() with the tail marker of a list as the predecessor, which puts the
-  node before the marker, did not set the node's back link: the node kept the
-  one it came with (0 for a cleared allocation, a pointer into another list for
-  a node that had been in one), so RemovePPC(), RemTailPPC() and a walk back
-  from the last node of the list went through it. The back link is set now,
-  with the same stores as 17.13b and WarpOS; 17.15 had lost one of them.
-- ObtainSemaphoreSharedPPC() raised the semaphore's nest count after it had
-  released the library's lock, so a task switch between reading and writing
-  the count, with another task obtaining or releasing the same semaphore in
-  between, lost one update. A lost increment let a later release take the
-  count to 0 while a reader still held the semaphore (an exclusive waiter was
-  then handed it) or below 0 (which halts the task); a lost decrement left the
-  count above 0, so the last release woke nobody and a waiting task slept for
-  good. The count is raised before the lock is released now. 17.13b and WarpOS
-  release the lock first, so this release differs from them on purpose;
-  ObtainSemaphorePPC(), whose count only its owner writes, keeps their order.
-- The 68k side searched its list of the processes that have used RunPPC()
-  without any lock, while a process that ended took its own entry off the list
-  and freed it. A task that was switched out in the middle of the search,
-  standing on the entry of a process that ended meanwhile, went on through
-  freed memory: exec writes the block's size over the entry's link, so the
-  search followed the low-memory vector area and then code words as if they
-  were list nodes (a bus error or a Guru on most machines), or, once the block
-  had been handed out again, came to the end early, so that RunPPC() built a
-  second entry and a second PPC task for its caller and WaitForPPC() answered
-  that no call was out while one was. RunPPC(), WaitForPPC() and the exit of
-  every process search the list with task switching forbidden now, and a
-  process that ends takes its entry off in the same forbidden section, before
-  the PPC task is told and the port and the entry are freed. 17.13b searches
-  and frees without a lock and tells the PPC task first; WarpOS searches with
-  task switching forbidden, as this release does.
-- A task exception handler (SetExceptPPC()) was run only when the task's
-  exception data was not 0, and was then called without a check that there was
-  one. A handler whose data is 0 (flag 0 hands the task structure's own value
-  to the handler) was not run and its signals stayed pending; a task with the
-  data set (flag 1 stores the caller's r2) and no handler made the kernel call
-  address 0 in supervisor mode when the first of its signals arrived. The
-  handler is run when the task has one now, with the data whatever it holds,
-  as WarpOS does and as its documentation says; 17.13b and 17.15 test the data.
-- AllocXMsg() on the 68k side left the 20 bytes of the message header out of
-  the size of the block and out of the length of the message, so a body of 64
-  gave a length of 64 where AllocXMsgPPC() gives 96, and a program that copied
-  or forwarded a message by its length lost the last 20 bytes. The header is
-  counted now, as 17.13b and WarpOS do.
-- The 68k process that stands for a PPC task made with CreateTaskPPC() (the one
-  that carries out the task's calls to the 68k) made its message port before
-  MasterControl had added the task's signal bits to its own, and which of the
-  two ran first was up to the scheduler. When the port came first it took signal
-  bit 31, which AllocSignalPPC(-1) gives the task as well: the two sides then
-  shared bit 31, and a signal on it was dropped between them for as long as the
-  pair lived. The process waits for MasterControl's signal before it makes the
-  port now, so the port's bit is chosen against the task's bits and cannot be
-  one of them. 17.13b gets the same order by waiting for its creator's message
-  first; WarpOS builds its 68k process differently.
-- The memory of a Harrier card was sized from a setting in the memory controller
-  that the card's firmware may or may not have made, and it was tested for a
-  mirror when a card with the setting unset got 256 MB of PCI space. A 128 MB
-  card that got 192 MB of PCI space was mapped as 192 MB, so the top 64 MB of
-  the PPC memory was its bottom 64 MB again (a mirror), with the page table and
-  the library's own structures in it, and a 64 MB card was not known at all.
-  The library measures the RAM now. It reads the setting as a size of 64, 128,
-  256 or 512 MB (any chip width; a card with the setting unset starts from 256
-  MB), takes the largest PCI memory it can get for that size (512 MB: 256+128,
-  256+64, 256, 192, 128 or 64; 256 MB: 256, 192, 128 or 64), writes a word at
-  the start and 64, 128 and 256 MB further up as far as the PCI memory reaches,
-  and where a word comes back at the start the RAM is that size: the PCI memory
-  goes back, the setting is rewritten to the size found and the largest PCI
-  memory that fits is taken. A card that announces its size and has that much
-  RAM is mapped as before. 17.13b tested every size but 16M8 and stopped with
-  "PPC memory wrapping error detected. Please reboot!"; this release goes on.
+  message frame still in use; the PPC waits for a free frame now, and the 68k
+  side no longer takes an empty queue for a frame.
+- The 68k side no longer freezes the machine, with interrupts off, when it
+  reads a message from the PPC twice and finds the queue empty (as in 17.13b).
+  ReplyMsgPPC() marks every reply NT_REPLYMSG.
+- As in WarpOS: CreateMsgPortPPC() returns NULL and gives back what it took
+  when it fails; AllocPooledPPC() and FreePooledPPC() with no pool return at
+  once (the program was stopped and every later PPC allocation hung), and
+  AllocPooledPPC() returns NULL for a size of 0.
+- As in WarpOS: ChangeStack() returns CHSTACK_SUCCESS, a second call works and
+  a request smaller than the stack succeeds without a change; RawDoFmtPPC()
+  printed every hexadecimal number wrongly, treated a precision as a minimum
+  and cut strings of 256 characters or more.
+- As in WarpOS: FreeXMsgPPC() and FreeXMsg() hand an XMsg made on the other
+  CPU to the side that made it (before: an error or corrupted memory), and a
+  PPC XMsg reaches a 68k port as NT_XMSGPPC.
+- AllocPooledPPC() for a size close to the puddle size failed and left an
+  empty puddle behind on every try; it gets its own block now. FreePooledPPC()
+  joins freed memory to the free space below it, as in 17.13b.
+- AllocXMsg() counts the 20-byte message header (a body of 64 gave a length of
+  64 where AllocXMsgPPC() gives 96), and InsertPPC() with the tail marker of a
+  list as the predecessor sets the node's back link (RemovePPC(), RemTailPPC()
+  and a walk back from the last node went through a stale link), as 17.13b and
+  WarpOS do.
+
+Caches and floating point:
+- SetCache() on a card without an L2 (K1, M1) flushes and invalidates the
+  range it is given, Run68K() flushes all its stack arguments, flushing the
+  whole data cache leaves no modified lines, turning the L2 off with
+  DisL2Flush set keeps its data, and a cache switched back on drops its old
+  lines; the Killer's L1 caches are cleared at start-up.
+- SetCache() on memory the PPC cannot reach (Amiga fast RAM, the ROM) killed
+  the task and slowed every later exception, and on chip RAM an invalidate
+  could damage the library's memory: it acts only on memory the PPC can cache
+  now.
+- An L2 whose size cannot be measured at start-up is taken as 1 MB (it was 256
+  MB, and a flush of the whole data cache crashed the program).
+- Floating-point accesses a G3 or G4 hands to software: a negative
+  displacement of a misaligned access is signed now (it went 64 KB too far),
+  lfdu, stfdu, lfsux, lfdx, lfdux, stfsux, stfdx, stfdux, stfiwx and dcbz are
+  emulated as in WarpOS, and a misaligned lwarx or stwcx. goes to the task's
+  exception handlers.
+- Indexed loads and stores (lfsx, lfdx, stfsx, stfdx) and lmw and stmw on
+  Amiga memory are refused like the other floating-point accesses there (they
+  were emulated as integer accesses).
+
+Start-up and cards:
+- Harrier: the start-up switched off copy-back snarfing (BXCS bit CSE), which
+  hung a G4 (ScummVM, GLQuake), and counted 983,299 interrupt acknowledgements
+  where 15 are meant; both fixed.
+- Harrier: the PPC memory is measured, not taken from the memory controller's
+  setting alone. The setting is read as 64, 128, 256 or 512 MB (unset: 256
+  MB), the largest PCI memory that fits is taken, and a word written 64, 128
+  and 256 MB up that comes back at the start shows a smaller RAM, so the
+  layout is reduced and the setting rewritten.
+- A 128 MB Harrier card that got 192 MB of PCI space was mapped as 192 MB (its
+  top 64 MB was its bottom 64 MB again), and a 64 MB card was not known;
+  17.13b stopped with "PPC memory wrapping error detected. Please reboot!".
+- The PCIe M1 (MPC8314E) starts and runs PPC programs. K1/M1 (PCI): the memory
+  of a second graphics card (a Radeon, with a Voodoo as primary card) is
+  usable by the PPC again, as in 17.13b.
+- prometheus.library is tried before pci.library (FireStorm/Firebird first,
+  otherwise the Mediator). GetInfo() GETINFO_CPU on Harrier and MPC107 boards
+  answers from the CPU itself, as 17.13b (the Harrier knew only a 750FX or
+  7410, the MPC107 took a 745x for a G3).
+- When the library cannot start (a 68030, another PPC library running, no
+  supported PCI bridge, a missing pci.library or prometheus.library) it shows
+  one requester and closes only the libraries it opened, each once (it could
+  close others, twice, or hang if the ramlib stack could not be enlarged; on
+  e300 cards a warning closed libraries still in use); a prometheus.library
+  that is too old is not left open.
+- The dummy warp.library (now 5.2) is built in PPC memory, so PPC code can
+  call it. The NICE table sits in the library's own memory, as in 17.13b.
+  SetHardware(HW_BRANCHTRACEOFF) clears the branch trace bit and not the
+  single-step bit.
+
+Program loader and process exit:
+- With SetCPUComm set, hunks that asked for FAST or CHIP memory are loaded
+  into Amiga memory. The loader recognises ppc.library and AmigaAMP, keeps the
+  memory of an overlaid program, gives back a file handle (and a FIB) when a
+  file cannot be examined, and makes no exception for one build of the Radeon
+  driver.
+- A process whose exit routine lay in ROM handed dos a return code of 0 and
+  left 16 bytes on the stack; it passes the code on and leaves the stack as it
+  was, as in 17.13b. The AllocMem() patch is as in 17.13b again (it read
+  address 0xFFFFFFFB for a task without a name, missed some task names, turned
+  away MEMF_FAST alone and had lost the AmigaAMP case).
 
 What has changed since 17.14:
 

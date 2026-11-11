@@ -2457,7 +2457,13 @@ PPCFUNCTION ULONG mySetHardware(__reg("r3") struct PrivatePPCBase* PowerPCBase, 
         }
         if (PowerPCBase->pp_ReadyTasks.mlh_Head->mln_Succ)
         {
-            status = PPCSTATEF_APPACTIVE;
+            /*
+             * C8, REVIEW-LIB.md: A READY TASK MEANS APPRUNNING. 17.13b's .PPCState answers
+             * PPCSTATEF_POWERSAVE, then PPCSTATEF_APPACTIVE for a waiting task, then
+             * PPCSTATEF_APPRUNNING for a ready one (ppcfunctions.p:6683-6697); this branch
+             * answered APPACTIVE again, so the answer could never be 4.
+             */
+            status = PPCSTATEF_APPRUNNING;
         }
     }
     else
@@ -3669,7 +3675,17 @@ PPCFUNCTION ULONG mySnoopTask(__reg("r3") struct PrivatePPCBase* PowerPCBase, __
         {
             mySnoop->sd_Code = (APTR)value;
             mySnoop->sd_Data = myGetTagDataPPC(PowerPCBase, SNOOP_DATA, 0, taglist);
-            if(!(mySnoop->sd_Type = myGetTagDataPPC(PowerPCBase, SNOOP_TYPE, 0, taglist)))
+            mySnoop->sd_Type = myGetTagDataPPC(PowerPCBase, SNOOP_TYPE, 0, taglist);
+
+            /*
+             * T10, REVIEW-LIB.md: ONLY SNOOP_START AND SNOOP_EXIT ARE SNOOPS. The dispatch compares
+             * the type for equality with those two (functionsppc.c, supportppc.c), so a node of
+             * any other type, 3 or 0x80 for instance, was listed, never called, and its address
+             * was returned as the snoop ID of a good request. 17.13b (ppcfunctions.p:5830-5837,
+             * :5859-5866) and WarpOS (powerpc.p:13083-13088, :13100-13105) free the node and
+             * return 0 for every type but these two, and for 0.
+             */
+            if ((mySnoop->sd_Type != SNOOP_START) && (mySnoop->sd_Type != SNOOP_EXIT))
             {
                 FreeVec68K(PowerPCBase, mySnoop);
                 mySnoop = 0;
@@ -3771,7 +3787,14 @@ PPCFUNCTION VOID mySetScheduling(__reg("r3") struct PrivatePPCBase* PowerPCBase,
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
     struct TagItem* myTagItem;
-    ULONG result;
+
+    /*
+     * T11, REVIEW-LIB.md: result is a LONG. 17.13b loads the argument and compares it with
+     * cmpwi (ppcfunctions.p:8046-8056) and so does WarpOS (powerpc.p:13220-13229), so a negative
+     * number is below 1 and gives 1. As a ULONG it read as a number above 20 and gave 20, a
+     * ceiling twenty times too wide for a caller that passed -1 for none.
+     */
+    LONG result;
 
     if (myTagItem = myFindTagItemPPC(PowerPCBase, SCHED_REACTION, taglist))
     {
