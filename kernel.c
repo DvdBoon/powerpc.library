@@ -888,8 +888,24 @@ PPCFUNCTION void TaskCheck(__reg("r3") struct PrivatePPCBase* PowerPCBase)
 
     if(currTask)
     {
+        /*
+         * E6 (REVIEW-LIB.md): THE GATE IS THE CODE, NOT THE DATA. This test read
+         * tc_ExceptData and then called tc_ExceptCode without a look at it. A task
+         * whose handler was in tc_ExceptCode and whose tc_ExceptData was NULL
+         * (SetExceptPPC with flag 0 hands the structure's own value to r2) had its
+         * armed signals left pending and its handler unrun; a task with
+         * tc_ExceptData set (SetExceptPPC with flag 1 stores r2) and tc_ExceptCode
+         * NULL had the kernel call address 0 in supervisor mode at its first armed
+         * signal. WarpOS tests the code (powerpc.p:4011-4013) and loads r2 from
+         * tc_ExceptData whatever it holds (:4031), and its autodoc calls
+         * tc_ExceptCode the handler: THIS MATCHES WarpOS and DIVERGES from 17.13b
+         * and 17.15, which test the data (setupppc.p:3637-3639, src_175/kernel.c:475).
+         * A NULL code leaves the signals pending as ordinary ones, and the
+         * waiting-task scan at the end of this function wakes a sleeper on them in
+         * this pass. Test: tests/excgate.
+         */
         if ((PowerPCBase->pp_TaskExcept) && (PowerPCBase->pp_TaskExcept == currTask) &&
-            (currTask->tp_Task.tc_ExceptData) && (mask = currTask->tp_Task.tc_SigRecvd & currTask->tp_Task.tc_SigExcept))
+            (currTask->tp_Task.tc_ExceptCode) && (mask = currTask->tp_Task.tc_SigRecvd & currTask->tp_Task.tc_SigExcept))
         {
             currTask->tp_Task.tc_SigRecvd &= ~mask;
             currTask->tp_Task.tc_SigExcept &= ~mask;

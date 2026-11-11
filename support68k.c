@@ -322,6 +322,55 @@ ULONG countDSI(__reg("d0") ULONG dsi_Address)
 *
 *********************************************************************************************/
 
+/*
+ * M7 (REVIEW-LIB.md): THE MIRROR LIST IS WALKED UNDER FORBID. RunPPC, WaitForPPC
+ * and commonRemTask followed pp_MirrorList from its head without a lock, while an
+ * exiting process took its own entry off under Disable and freed it after the
+ * Enable (DeleteMsgPort, FreeVec). A walker that exec had switched out standing
+ * on that entry resumed on freed memory. The entry is an AllocVec block, which
+ * keeps a size longword in front of it, so FreeMem wrote the chunk size, 32, over
+ * mln_Succ: the walker took the low-memory vector area for the next node and
+ * followed code words as pointers (a bus error or a Guru on most machines); with
+ * the chunk reused it read 0 and the walk ended early, and RunPPC then made a
+ * second entry and a second PPC task for its caller, and WaitForPPC answered
+ * PPERR_WAITERR with a call still out. A reader under Forbid cannot be switched
+ * out while it holds a pointer into the list, and a remover's Forbid section
+ * cannot overlap a reader's, so the free after the Permit meets no reader.
+ *
+ * 17.13b walks without a lock in three places (powerpc.s:3592-3603 RunPPC,
+ * :3822-3832 WaitForPPC, :3121-3128 the RemTask exit code), removes under
+ * Disable (:3135-3140) and frees after the Enable (:3142-3146); WarpOS walks its
+ * Core list between Forbid and Permit (FindCoreEntry, powerpc.s:3673-3695) and
+ * removes under Forbid (:5046-5049): THIS DIVERGES from 17.13b and MATCHES
+ * WarpOS. The entry returned is the caller's own, which only the caller's exit
+ * frees, so the caller uses it outside the Forbid. Test: tests/mirrorrace.
+ */
+struct MirrorTask* FindMirror(struct PrivatePPCBase* PowerPCBase, struct Task* task)
+{
+    struct ExecBase* SysBase = PowerPCBase->pp_PowerPCBase.PPC_SysLib;
+    struct MirrorTask* found = NULL;
+    struct MirrorTask* currMir;
+    struct MirrorTask* nxtMir;
+
+    Forbid();
+
+    currMir = (struct MirrorTask*)PowerPCBase->pp_MirrorList.mlh_Head;
+
+    while (nxtMir = (struct MirrorTask*)currMir->mt_Node.mln_Succ)
+    {
+        if (currMir->mt_Task == task)
+        {
+            found = currMir;
+            break;
+        }
+        currMir = nxtMir;
+    }
+
+    Permit();
+
+    return found;
+}
+
 void commonRemTask(__reg("a1") struct Task* myTask, __reg("d0") ULONG flag, __reg("a6") struct ExecBase* SysBase)
 {
     if (!(myTask))
@@ -332,37 +381,57 @@ void commonRemTask(__reg("a1") struct Task* myTask, __reg("d0") ULONG flag, __re
     if (myTask->tc_Node.ln_Type == NT_PROCESS)
     {
         struct PrivatePPCBase* PowerPCBase = (struct PrivatePPCBase*)myPPCBase;
-        struct MirrorTask* currMir = (struct MirrorTask*)PowerPCBase->pp_MirrorList.mlh_Head;
+        struct MirrorTask* currMir;
         struct MirrorTask* nxtMir;
+        struct MirrorTask* found = NULL;
+
+        /*
+         * M7: THE ENTRY IS FOUND AND TAKEN OFF IN ONE FORBID SECTION, and what
+         * needs the 68k's time comes after it -- the END frame (CreateMsgFrame
+         * can wait for the PPC to free a frame, Q4), DeleteMsgPort and FreeVec. A
+         * second remover of the same task (the owner exiting while another
+         * process kills it) finds nothing, where it used to find the entry still
+         * listed while this one was waiting for a frame, and freed it twice.
+         * 17.13b sends the END frame first and removes after it (powerpc.s:3130-3140);
+         * the entry is off the list before the PPC task is told now.
+         */
+        Forbid();
+
+        currMir = (struct MirrorTask*)PowerPCBase->pp_MirrorList.mlh_Head;
+
         while (nxtMir = (struct MirrorTask*)currMir->mt_Node.mln_Succ)
         {
             if (currMir->mt_Task == myTask)
             {
-                /*
-                 * ONLY A PPC TASK THAT EXISTS IS ENDED -- M3 (REVIEW-LIB.md). An
-                 * entry whose first call never came back has no PPC task, and
-                 * HandleMsgs (kernel.c) routes ID_END through mf_PPCTask: NULL
-                 * was dereferenced there. NO COUNTERPART in WarpOS, whose entry
-                 * always holds its PPC process (CreatePPCProc runs before
-                 * CreateCoreEntry, powerpc.s:3754-3755, :3816) and whose RemTask
-                 * patch signals it (:5039-5041).
-                 */
-                if ((!(flag)) && (currMir->mt_PPCTask))
-                {
-                    struct MsgFrame* myFrame = CreateMsgFrame(PowerPCBase);
-                    myFrame->mf_Identifier = ID_END;
-                    myFrame->mf_PPCTask = currMir->mt_PPCTask;
-                    SendMsgFrame(PowerPCBase, myFrame);
-                }
-                Disable();
                 Remove((struct Node*)currMir);
-                Enable();
-                DeleteMsgPort(currMir->mt_Port);
-                FreeVec(currMir);
-
+                found = currMir;
                 break;
             }
             currMir = nxtMir;
+        }
+
+        Permit();
+
+        if (found)
+        {
+            /*
+             * ONLY A PPC TASK THAT EXISTS IS ENDED -- M3 (REVIEW-LIB.md). An
+             * entry whose first call never came back has no PPC task, and
+             * HandleMsgs (kernel.c) routes ID_END through mf_PPCTask: NULL
+             * was dereferenced there. NO COUNTERPART in WarpOS, whose entry
+             * always holds its PPC process (CreatePPCProc runs before
+             * CreateCoreEntry, powerpc.s:3754-3755, :3816) and whose RemTask
+             * patch signals it (:5039-5041).
+             */
+            if ((!(flag)) && (found->mt_PPCTask))
+            {
+                struct MsgFrame* myFrame = CreateMsgFrame(PowerPCBase);
+                myFrame->mf_Identifier = ID_END;
+                myFrame->mf_PPCTask = found->mt_PPCTask;
+                SendMsgFrame(PowerPCBase, myFrame);
+            }
+            DeleteMsgPort(found->mt_Port);
+            FreeVec(found);
         }
     }
     return;

@@ -480,6 +480,34 @@ What has changed since 17.15:
   good. The count is raised before the lock is released now. 17.13b and WarpOS
   release the lock first, so this release differs from them on purpose;
   ObtainSemaphorePPC(), whose count only its owner writes, keeps their order.
+- The 68k side searched its list of the processes that have used RunPPC()
+  without any lock, while a process that ended took its own entry off the list
+  and freed it. A task that was switched out in the middle of the search,
+  standing on the entry of a process that ended meanwhile, went on through
+  freed memory: exec writes the block's size over the entry's link, so the
+  search followed the low-memory vector area and then code words as if they
+  were list nodes (a bus error or a Guru on most machines), or, once the block
+  had been handed out again, came to the end early, so that RunPPC() built a
+  second entry and a second PPC task for its caller and WaitForPPC() answered
+  that no call was out while one was. RunPPC(), WaitForPPC() and the exit of
+  every process search the list with task switching forbidden now, and a
+  process that ends takes its entry off in the same forbidden section, before
+  the PPC task is told and the port and the entry are freed. 17.13b searches
+  and frees without a lock and tells the PPC task first; WarpOS searches with
+  task switching forbidden, as this release does.
+- A task exception handler (SetExceptPPC()) was run only when the task's
+  exception data was not 0, and was then called without a check that there was
+  one. A handler whose data is 0 (flag 0 hands the task structure's own value
+  to the handler) was not run and its signals stayed pending; a task with the
+  data set (flag 1 stores the caller's r2) and no handler made the kernel call
+  address 0 in supervisor mode when the first of its signals arrived. The
+  handler is run when the task has one now, with the data whatever it holds,
+  as WarpOS does and as its documentation says; 17.13b and 17.15 test the data.
+- AllocXMsg() on the 68k side left the 20 bytes of the message header out of
+  the size of the block and out of the length of the message, so a body of 64
+  gave a length of 64 where AllocXMsgPPC() gives 96, and a program that copied
+  or forwarded a message by its length lost the last 20 bytes. The header is
+  counted now, as 17.13b and WarpOS do.
 
 What has changed since 17.14:
 

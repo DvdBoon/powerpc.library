@@ -91,6 +91,7 @@ struct MsgFrame*  CreateMsgFrame(struct PrivatePPCBase* PowerPCBase);
 void              SendMsgFrame  (struct PrivatePPCBase* PowerPCBase, struct MsgFrame* msgFrame);
 void              FreeMsgFrame  (struct PrivatePPCBase* PowerPCBase, struct MsgFrame* msgFrame);
 struct MsgFrame*  GetMsgFrame   (struct PrivatePPCBase* PowerPCBase);
+struct MirrorTask* FindMirror (struct PrivatePPCBase* PowerPCBase, struct Task* task);
 
 struct InitData *SetupPKiller (struct InternalConsts* myConsts, ULONG devfuncnum, struct PciDevice* ppcdevice, PCIBoard* pppcdevice, ULONG initPointer);
 struct InitData *SetupKiller  (struct InternalConsts* myConsts, ULONG devfuncnum, struct PciDevice* ppcdevice, PCIBoard* pppcdevice, ULONG initPointer);
