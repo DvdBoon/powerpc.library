@@ -386,6 +386,14 @@ Start-up and cards:
 - MPC745x boards: the time base and decrementer are switched on (HID0 TBEN)
   and the on-chip L2 is set up with its own sequence, whose invalidate is
   waited for on L2I (not run on a 745x board).
+- K1/M1 (PCI): a frame posted just as the PPC finished reading the queue waited
+  for the next interrupt; the interrupt is acknowledged before the queue is
+  read now (the PCIe M1 likewise, not run there).
+- K1/M1 (PCI): the bus clock and the task slice follow the board's DDRCM
+  strap; the reset word was read byte-reversed and the wrong bit tested.
+- MPC107: the wait for the PPC's first exception at start-up is bounded (a PPC
+  that stopped hung ramlib for good) and ends with "PowerPC CPU stopped after
+  setup" (not run on an MPC107 board).
 
 Program loader and process exit:
 - With SetCPUComm set, hunks that asked for FAST or CHIP memory are loaded

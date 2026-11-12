@@ -294,7 +294,30 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
 
 		        case DEVICE_MPC8343E:
 		        {
-                    if (loadPCI(IMMR_ADDR_DEFAULT, IMMR_IMISR) & IMMR_IMISR_IDI)
+                    /*
+                     * Q5: THE MESSAGE INTERRUPT IS ACKNOWLEDGED BEFORE THE QUEUE IS READ.
+                     * The write of IM0I came after the drain, so a frame the 68k posted
+                     * after the drain's last read and before that write had its IM0I
+                     * wiped while its slot stayed unread: it waited for the next frame's
+                     * interrupt. Acknowledged first, a frame posted before the write is
+                     * in the queue the drain reads (the 68k stores the slot and the head
+                     * before it writes IMR0, which sets IM0I), and one posted after it
+                     * sets IM0I again and interrupts again. IMISR is read once and the
+                     * write clears IM0I alone. The EXCF_INTERRUPT handlers that
+                     * CommonExcHandler runs below now see IM0I acknowledged
+                     * (tests/killack looks at that). 17.13b acknowledges after the drain
+                     * (setupppc.p:2707-2711) and not at all when the queue was empty at
+                     * entry (:2682-2683): THIS DIVERGES, rightly. WarpOS has no such
+                     * unit (a search of warpos/ for IM0I, IMISR and MPC8343 finds no
+                     * line, 12 Nov 2026).
+                     */
+                    ULONG imisr = loadPCI(IMMR_ADDR_DEFAULT, IMMR_IMISR);
+
+                    if (imisr & IMMR_IMISR_IM0I)
+                    {
+                        storePCI(IMMR_ADDR_DEFAULT, IMMR_IMISR, IMMR_IMISR_IM0I);
+                    }
+                    if (imisr & IMMR_IMISR_IDI)
                     {
                         storePCI(IMMR_ADDR_DEFAULT, IMMR_IDR, 1);
                         CommonExcHandler(PowerPCBase, iframe, (struct List*)&PowerPCBase->pp_ExcInterrupt);
@@ -305,24 +328,27 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                     {
                         AddTailPPC((struct List*)&PowerPCBase->pp_MsgQueue, (struct Node*)msgFrame);
                     }
-
-                    if (loadPCI(IMMR_ADDR_DEFAULT, IMMR_IMISR) & IMMR_IMISR_IM0I)
-                    {
-                        storePCI(IMMR_ADDR_DEFAULT, IMMR_IMISR, IMMR_IMISR_IM0I);
-                    }
                     break;
 		        }
                 case DEVICE_MPC8314E: //CausePPCInterrupt should be handled here
                 {
+                    /*
+                     * Q5, the PCIe M1's half: the order of the MPC8343E's arm above. The
+                     * write-back of CSMISR clears the bits that were set when it was read,
+                     * and a frame posted after it sets its bit again. 17.13b has no PCIe M1
+                     * (a search of src_173b for MPC8314 and PEX_ finds no line) and WarpOS
+                     * none (warpos/, 12 Nov 2026): NO COUNTERPART. No PCIe M1 has run this
+                     * order.
+                     */
+                    writememLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_IMBCR, 0);
+                    writememLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_CSMISR, readmemLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_CSMISR));
+
                     struct MsgFrame* msgFrame;
 
                     while (msgFrame = KGetMsgFramePPC(PowerPCBase))
                     {
                         AddTailPPC((struct List*)&PowerPCBase->pp_MsgQueue, (struct Node*)msgFrame);
                     }
-
-                    writememLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_IMBCR, 0);
-                    writememLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_CSMISR, readmemLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_CSMISR));
                     break;
                 }
 		        case DEVICE_MPC107:

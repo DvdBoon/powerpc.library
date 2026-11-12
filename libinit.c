@@ -1317,6 +1317,34 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
         return NULL;
     }
 
+    /*
+     * L6: THE MPC107's WAIT FOR THE PPC'S FIRST EXCEPTION IS BOUNDED, as the wait
+     * for STATUS_READY above it. zp_DECCounter is raised only at exception entry
+     * (kernel.s, the longword at 0x24 of page zero), so a PPC that stopped after
+     * STATUS_READY left the unbounded loop that stood in the switch below spinning
+     * for good, and ramlib with it. The wait is here, before the Exec patches, and
+     * not in the switch where it was: a failure now leaves the machine as the
+     * STATUS_READY failure does, and not with patches installed that point into a
+     * segment ramlib then frees. 17.13b has no such wait, 17.15 had it unbounded
+     * (REVIEW-LIB.md L6); WarpOS has no MPC107 code (a search of warpos/ for
+     * MPC107 and DECCounter finds no line, 12 Nov 2026).
+     */
+    if (deviceID == DEVICE_MPC107)
+    {
+        for (i=0; i<0xEC0000; i++)
+        {
+            if (myZeroPage->zp_DECCounter)
+            {
+                break;
+            }
+        }
+        if (i == 0xEC0000)
+        {
+            PrintCrtErr(myConsts, "PowerPC CPU stopped after setup");
+            return NULL;
+        }
+    }
+
     Disable();
 
     /*
@@ -1360,8 +1388,7 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
         }
         case DEVICE_MPC107:
         {
-            while (!(myZeroPage->zp_DECCounter));
-
+            /* the wait for zp_DECCounter is bounded above, before the Exec patches (L6) */
             ULONG otwrValue = (swap32(((ULONG)(cd->cd_BoardAddr) - offset) | MPC107_TWR_512MB)) & -2;
             writememL(myBase->pp_BridgeMsgs, MPC107_OTWR, otwrValue);
             writememL(myBase->pp_BridgeMsgs, MPC107_OMBAR, otwrValue + ((OFFSET_PCIMEM + offset) >> 24));

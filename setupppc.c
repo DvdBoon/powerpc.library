@@ -1202,7 +1202,23 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
             quantum = QUANTUM_E300;
             busclock = BUSCLOCK_E300;
 
-            if (loadPCI(IMMR_ADDR_DEFAULT, IMMR_RCWLR) & (1<<RCWLR_DDRCM))
+            /*
+             * S4: RCWLR IS READ AS THE BIG-ENDIAN REGISTER IT IS. loadPCI is lwbrx,
+             * for the little-endian message unit registers; read through it the word
+             * arrives byte-reversed, and (1<<RCWLR_DDRCM) then tested bit 25 of the
+             * register (0x02000000, a bit of SPMF) and never DDRCM. DDRCM is bit 1 in
+             * the manual's numbering, 0x40000000 (MPC8349EA RM, Figure 4-3 and Table
+             * 4-8, PDF pages 163-164): set, the DDR controller runs at twice csb_clk,
+             * and the csb clock, which the quantum and the time base follow, is half
+             * of BUSCLOCK_E300. The read is readmemLongPPC (lwzx), as every other
+             * big-endian IMMR register here, and the 17.13b read (lwz, setupppc.p:486).
+             * 17.13b halves when either of the two top bits is set (rlwinm. 2,30,31,
+             * :487-488), LBIUCM (the local bus ratio, which says nothing of csb_clk)
+             * or DDRCM: this tests DDRCM alone, so THE LIBRARY DIVERGES on LBIUCM
+             * (tests/rcwlr prints both bits). WarpOS has no such board (a search of
+             * warpos/ for RCWLR, DDRCM and MPC8343 finds no line, 12 Nov 2026).
+             */
+            if (readmemLongPPC(IMMR_ADDR_DEFAULT, IMMR_RCWLR) & (0x80000000UL >> RCWLR_DDRCM))
             {
                 quantum = quantum >> 1;
                 busclock = busclock >> 1;
