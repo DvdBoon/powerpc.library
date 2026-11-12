@@ -104,8 +104,8 @@ are:
 - SetCMemDiv (0-5): Sets the speed divider of the L2 Cache memory.
   5 = 3, 4 = 2.5, 3 = 2, 2 = 1.5, 1 = 1, 0 = library default (3). Default = 0.
   For example: A Sonnet with speed 500 MHz and setting 5 will run the L2 cache
-  at 166 MHz (500/3). No effect on a 750FX or 745x, whose L2 cache is on the
-  CPU. **USE AT OWN RISK!!!**
+  at 166 MHz (500/3). No effect on a Harrier card with a 750FX, whose L2
+  cache is on the CPU. **USE AT OWN RISK!!!**
 - ReportG4asG3 (0 or 1): If set, a G4 is reported as a G3 by GetCPU() and by
   GetInfo() (CPU and PVR), and AltiVec is not enabled. Default = 0.
  
@@ -180,7 +180,8 @@ What has changed since 17.15:
 
 ENV options (see above):
 - Added ReportG4asG3. EnMemExc replaces EnAlignExc and EnDAccessExc.
-  SetCMemDiv was read but did nothing; it works now.
+  SetCMemDiv was read but did nothing; it works now, and the divider is set
+  before the L2 cache is switched on (it was changed while the cache ran).
 
 Scheduler and tasks:
 - Task priorities work now: the WarpOS priority scheduler (NEWPRIRULE) with
@@ -191,6 +192,8 @@ Scheduler and tasks:
 - The tc_Switch and tc_Launch hooks are called, the per-task CPU usage is
   right, TASKATTR_BAT tasks get the system BATs and TASKATTR_ATOMIC tasks keep
   the CPU until they wait or end, as in WarpOS.
+- The helpers that load a BAT write all four of its registers now (the first
+  was written four times). ChangeMMU() is still a stub, as in 17.13b.
 - SetScheduling() compares SCHED_REACTION as a signed number (-1 gave 20, the
   widest ceiling, and gives 1 now, as in 17.13b and WarpOS). SnoopTask()
   refuses a type other than SNOOP_START and SNOOP_EXIT instead of returning an
@@ -335,6 +338,9 @@ Caches and floating point:
   now.
 - An L2 whose size cannot be measured at start-up is taken as 1 MB (it was 256
   MB, and a flush of the whole data cache crashed the program).
+- GetInfo() reads the cache state, the page table and the L2 from the CPU at
+  the call (after a SetCache() it showed the old state), and its L2 tags answer
+  on/off as 1 or 0, the write-through state and the size in use, as in 17.13b.
 - Floating-point accesses a G3 or G4 hands to software: a negative
   displacement of a misaligned access is signed now (it went 64 KB too far),
   lfdu, stfdu, lfsux, lfdx, lfdux, stfsux, stfdx, stfdux, stfiwx and dcbz are

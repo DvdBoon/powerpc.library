@@ -666,7 +666,45 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
     ULONG num = 0;
     ULONG pll, l2Size, l2Setting;
     struct CacheSize cz;
-    UBYTE l2Programmed = 0;     /* this function set up an external L2's clock */
+
+    /*
+     * L7, REVIEW-LIB.md: THE L2 CLOCK DIVIDER IS CHOSEN BEFORE THE L2 IS PROGRAMMED.
+     * ENV:sonnet/SetCMemDiv: 1, 2, 3, 4 give /1, /1.5, /2, /2.5 and every other value
+     * /3 (17.13b's parse, setupppc.p:1308-1329; its default also clocked a 400 MHz CPU
+     * with 1 MB of L2 at /2, :1331-1338, which is left out, so an unset variable
+     * changes nothing). The divider goes into the first write of L2CR below, with L2E
+     * clear, so the DLL locks while the invalidate runs and the L2 is enabled after
+     * both: the manual's sequence (MPC7410UM 3.7.5, PDF p. 240: clear L2E, set L2CLK,
+     * wait for the lock or run the global invalidate, which takes much longer, then set
+     * L2E). This function used to program /3 and, after the CPU speed, rewrite L2CR
+     * with the chosen divider while L2E was set, with no flush, invalidate or wait.
+     * 17.13b does that (setupppc.p:1340-1355), but the manual wants the DLL to
+     * stabilize before the L2 interface is enabled (PDF p. 237), and the L2 ran while
+     * it re-locked. THIS DIVERGES from 17.13b in the order, in the safe direction; the
+     * size probe now runs at the chosen divider. Only the arms that program an external
+     * L2 themselves use it: 17.13b also wrote L2CR on a 750FX or 745x, whose L2 is on
+     * the chip. An if/else chain, not a switch: this function lives in .setupppc
+     * (PPCSETUP) and a jump table would not.
+     */
+    UBYTE memDiv = (UBYTE)initData->id_Environment2;
+    ULONG l2Clock = L2CR_L2CLK_3;
+
+    if (memDiv == 1)
+    {
+        l2Clock = L2CR_L2CLK_1;
+    }
+    else if (memDiv == 2)
+    {
+        l2Clock = L2CR_L2CLK_1_5;
+    }
+    else if (memDiv == 3)
+    {
+        l2Clock = L2CR_L2CLK_2;
+    }
+    else if (memDiv == 4)
+    {
+        l2Clock = L2CR_L2CLK_2_5;
+    }
 
     switch (PowerPCBase->pp_DeviceID)
     {
@@ -702,7 +740,7 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
             }
             else
             {
-                l2Setting = L2CR_L2SIZ_1M | L2CR_L2CLK_3 | L2CR_L2RAM_BURST | L2CR_TS;
+                l2Setting = L2CR_L2SIZ_1M | l2Clock | L2CR_L2RAM_BURST | L2CR_TS;
 
                 if (!(getL2CR() & L2CR_L2E))
                 {
@@ -725,7 +763,6 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
 
                 setL2CR(l2Setting);
                 l2Size = cz.cz_SizeBytes;
-                l2Programmed = 1;
 
                 pll = value1 >> 28;
 
@@ -787,7 +824,7 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
             value0 |= HID0_ICE | HID0_DCE | HID0_SGE | HID0_BTIC | HID0_BHTE;
             setHID0(value0);
 
-            l2Setting = L2CR_L2SIZ_1M | L2CR_L2CLK_3 | L2CR_L2RAM_BURST | L2CR_TS;
+            l2Setting = L2CR_L2SIZ_1M | l2Clock | L2CR_L2RAM_BURST | L2CR_TS;
 
             if (!(getL2CR() & L2CR_L2E))
             {
@@ -810,7 +847,6 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
 
             setL2CR(l2Setting);
             l2Size = cz.cz_SizeBytes;
-            l2Programmed = 1;
 
             ULONG* pllTable;
             pll = value1 >> 28;
@@ -834,48 +870,6 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
                 num +=2;
             }
             break;
-        }
-    }
-
-    /*
-     * ENV:sonnet/SetCMemDiv, the L2 clock divider: read since 17.13b, never
-     * used by the C library until 31 Oct 2026. As 17.13b's setupppc.p
-     * :1308-1343 does it, after the CPU speed: 1, 2, 3, 4 replace the /3
-     * programmed above with /1, /1.5, /2, /2.5 in L2CR, the L2 still
-     * enabled; 0 and 5 (and 6, 7) keep /3. 17.13b's default also clocked a
-     * 400 MHz CPU with 1 MB of L2 at /2 (:1331-1338); that is left out, so
-     * an unset variable changes nothing. Only where this function set up an
-     * external L2 itself: 17.13b also wrote L2CR on a 750FX or 745x, whose L2
-     * is on the chip. An if/else chain, not a switch: this function lives
-     * in .setupppc (PPCSETUP) and a jump table would not.
-     */
-    if (l2Programmed)
-    {
-        UBYTE memDiv = (UBYTE)initData->id_Environment2;
-        ULONG l2Clock = 0;
-
-        if (memDiv == 1)
-        {
-            l2Clock = L2CR_L2CLK_1;
-        }
-        else if (memDiv == 2)
-        {
-            l2Clock = L2CR_L2CLK_1_5;
-        }
-        else if (memDiv == 3)
-        {
-            l2Clock = L2CR_L2CLK_2;
-        }
-        else if (memDiv == 4)
-        {
-            l2Clock = L2CR_L2CLK_2_5;
-        }
-
-        if (l2Clock)
-        {
-            l2Setting &= ~L2CR_L2CLK_3;
-            l2Setting |= l2Clock;
-            setL2CR(l2Setting);
         }
     }
 

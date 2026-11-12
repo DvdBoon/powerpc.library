@@ -797,9 +797,9 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
 
             struct SysCall* sc = (struct SysCall*)scReg;
 
-            /* the five calls are KSystemCall's, which a handler calls
+            /* the six calls are KSystemCall's, which a handler calls
              * directly (REVIEW-LIB.md K1); r3 comes back as it did: the frame
-             * for CREATEMSG and GETMSG, untouched for the other three */
+             * for CREATEMSG and GETMSG, untouched for the other four */
             switch (sc->sc_Function)
             {
                 case SC_CREATEMSG:
@@ -811,6 +811,7 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                 case SC_SENDMSG:
                 case SC_FREEMSG:
                 case SC_SETCACHE:
+                case SC_GETCPUSTATE:
                 {
                     KSystemCall(PowerPCBase, sc);
                     break;
@@ -2686,13 +2687,13 @@ PPCKERNEL VOID KFreeMsgFramePPC(__reg("r3") struct PrivatePPCBase* PowerPCBase, 
 PPCKERNEL ULONG KSystemCall(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") struct SysCall* sc)
 {
     /*
-     * THE FIVE SYSTEM CALLS, in one place. A task reaches them by "sc", through
+     * THE SIX SYSTEM CALLS, in one place. A task reaches them by "sc", through
      * the VEC_SYSTEMCALL arm of Exception_Entry. An exception handler calls
      * this directly, by the address libinit.c stores in pp_KSystemCall
      * (supportppc.c's CallKernel): it is already in supervisor mode inside the
      * kernel, and an "sc" from there re-entered the kernel and clobbered the
      * interrupted task's saved state -- REVIEW-LIB.md K1. Returns the frame for
-     * SC_CREATEMSG and SC_GETMSG, 0 for the other three.
+     * SC_CREATEMSG and SC_GETMSG, 0 for the other four.
      */
     switch (sc->sc_Function)
     {
@@ -2717,6 +2718,32 @@ PPCKERNEL ULONG KSystemCall(__reg("r3") struct PrivatePPCBase* PowerPCBase, __re
         case SC_SETCACHE:
         {
             KSetCache(PowerPCBase, sc->sc_Arg[0], (APTR)sc->sc_Arg[1], sc->sc_Arg[2]);
+            break;
+        }
+        case SC_GETCPUSTATE:
+        {
+            /*
+             * C7, REVIEW-LIB.md: THE THREE FIELDS GetInfo READS, REFRESHED AT ITS
+             * CALL. pp_CPUHID0, pp_CPUSDR1 and pp_L2State are stored at every
+             * exception entry (Exception_Entry, above), and a SetCache that
+             * changes HID0 or L2CR traps into the kernel, whose entry stores
+             * them BEFORE the arm runs: a GetInfo straight after it answered
+             * the state from before the call, until the next exception, up to
+             * a quantum later. 17.13b's GetInfo goes to supervisor mode, stores
+             * HID0, SDR1 and (not on a MPC834x) L2CR in the base, and comes
+             * back (ppcfunctions.p:1138-1154); WarpOS's reads HID0 in
+             * supervisor mode at the call (powerpc.p:12016-12034): THIS
+             * MATCHES both. The stores are the entry's own, so that a handler,
+             * which calls here directly, gets the same. The e300 cards have no
+             * L2CR.
+             */
+            PowerPCBase->pp_CPUSDR1 = getSDR1();
+            PowerPCBase->pp_CPUHID0 = getHID0();
+
+            if ((PowerPCBase->pp_DeviceID != DEVICE_MPC8343E) && (PowerPCBase->pp_DeviceID != DEVICE_MPC8314E))
+            {
+                PowerPCBase->pp_L2State = getL2State();
+            }
             break;
         }
     }

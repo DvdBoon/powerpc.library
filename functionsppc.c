@@ -2840,6 +2840,7 @@ PPCFUNCTION VOID myGetInfo(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
     printDebug(PowerPCBase, (struct DebugArgs*)&args);
 
 	struct TagItem* myTagItem = NULL;
+    UBYTE refreshed = 0;
 
     struct TagItemPtr tagPtr;
     tagPtr.tip_TagItem = taglist;
@@ -2848,6 +2849,29 @@ PPCFUNCTION VOID myGetInfo(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
     {
         if ((myTagItem->ti_Tag & 0xffffe000) == GETINFO_TAGS)
 		{
+            /*
+             * C7, REVIEW-LIB.md: THE STATE IS READ AT THE CALL. The answers below to
+             * ICACHE, DCACHE, PAGETABLE and the two L2 state tags come from
+             * pp_CPUHID0, pp_CPUSDR1 and pp_L2State, which the kernel stored at the
+             * last exception entry; a SetCache from this task changes HID0 or L2CR
+             * after that entry's store, so the answer was the state from before it,
+             * until the next exception. The first such tag of a call has the kernel
+             * store the three again (SC_GETCPUSTATE: an "sc" from a task, the kernel
+             * directly from a handler); 17.13b's GetInfo does it once per call, in
+             * supervisor mode (ppcfunctions.p:1138-1154), and WarpOS's reads HID0 so
+             * (powerpc.p:12016-12034). A call for tags that read none of the three
+             * (the load figures, the clocks) does not trap.
+             */
+            if ((!refreshed) && ((myTagItem->ti_Tag == GETINFO_ICACHE) || (myTagItem->ti_Tag == GETINFO_DCACHE) ||
+                                 (myTagItem->ti_Tag == GETINFO_PAGETABLE) || (myTagItem->ti_Tag == GETINFO_L2STATE) ||
+                                 (myTagItem->ti_Tag == GETINFO_L2WT)))
+            {
+                struct SysCall sc;
+                sc.sc_Function = SC_GETCPUSTATE;
+                CallKernel(PowerPCBase, &sc);
+                refreshed = 1;
+            }
+
             switch (myTagItem->ti_Tag)
             {
                 case GETINFO_CPU:
@@ -3006,14 +3030,30 @@ PPCFUNCTION VOID myGetInfo(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
                     myTagItem->ti_Data = PowerPCBase->pp_SystemLoad;
                     break;
                 }
+                /*
+                 * C7: THE THREE L2 TAGS AS 17.13b ANSWERS THEM (ppcfunctions.p:1301-1310).
+                 * 0x8010200A is L2CR bit 0 as 1 or 0 (it was the bit itself, 0x80000000, or
+                 * 0), 0x8010200B is L2CR bit 12, write-through, as 1 or 0 (there was no case:
+                 * the caller's ti_Data stayed as it was passed), 0x8010200C is the size of
+                 * the L2 that is on: pp_CurrentL2Size, 0 after SetCache(L2CACHEOFF) and the
+                 * size again after L2CACHEON (it was pp_L2Size, which says what the board
+                 * has and not what is on). On the e300 cards pp_L2State stays 0 and the
+                 * size is 0. WarpOS's GetInfo looks up ten tags, PPCINFO_CPU to
+                 * PPCINFO_CPUCLOCK (powerpc.p:12036-12136), none for the L2: NO COUNTERPART.
+                 */
                 case GETINFO_L2STATE:
                 {
-                    myTagItem->ti_Data = PowerPCBase->pp_L2State & L2CR_L2E;
+                    myTagItem->ti_Data = (PowerPCBase->pp_L2State & L2CR_L2E) ? 1 : 0;
+                    break;
+                }
+                case GETINFO_L2WT:
+                {
+                    myTagItem->ti_Data = (PowerPCBase->pp_L2State & L2CR_L2WT) ? 1 : 0;
                     break;
                 }
                 case GETINFO_L2SIZE:
                 {
-                    myTagItem->ti_Data = PowerPCBase->pp_L2Size;
+                    myTagItem->ti_Data = PowerPCBase->pp_CurrentL2Size;
                     break;
                 }
             }

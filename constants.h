@@ -25,6 +25,7 @@
 #define SC_SENDMSG              0x80000003
 #define SC_FREEMSG              0x80000004
 #define SC_SETCACHE             0x80000005
+#define SC_GETCPUSTATE          0x80000006      /* C7: HID0, SDR1 and L2CR into the base, now (GetInfo) */
 
 #define LIB_FLAGPPC_DHP         0x8
 #define LIB_FLAGPPC_SCC         0x4
@@ -54,7 +55,11 @@
 #define CMP_DESTLESS            1
 #define CMP_EQUAL               0
 
+/* 17.13b's three L2 tags, ppcdefines.i:305-307: 0x8010200A PPCINFO_L2CACHE (on or off), 0x8010200B
+ * PPCINFO_L2STATE (copy-back or write-through: this name is GETINFO_L2WT here, since GETINFO_L2STATE
+ * has been 0x8010200A since the first C library), 0x8010200C PPCINFO_L2SIZE */
 #define GETINFO_L2STATE         0x8010200A
+#define GETINFO_L2WT            0x8010200B
 #define GETINFO_L2SIZE          0x8010200C
 
 #define TASKATTR_PRIVATE        0x80100011
