@@ -2793,6 +2793,7 @@ PPCKERNEL VOID FlushDCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
      */
     ULONG lines;
     ULONG mem;
+    ULONG base = 0;
     ULONG i;
 
     if ((PowerPCBase->pp_CacheDisDFlushAll) && !(withL2))
@@ -2806,7 +2807,23 @@ PPCKERNEL VOID FlushDCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
 
     lines += 2 * CACHE_L1SIZE;
 
-    mem = 0;
+    /*
+     * S8 (REVIEW-LIB.md): THE RANGE MUST BE MAPPED. It starts at EA 0, the kernel's BAT0, which is 2 MB
+     * long (setupppc.c:315-318); beyond it nothing is mapped, and a load there is a DSI inside the kernel
+     * that kills the caller (the fault S2 fixed for a count of lines taken as bytes). With the L2 sized by
+     * function a 2 MB L2 is possible, and its range, the L2 plus two L1 data caches, is 0x210000 bytes. A range
+     * that does not fit BAT0 starts at the system memory instead (the PPC's first 4 MB are the kernel,
+     * the zero page and the message window), which the page table maps copy-back as the rest of the PPC
+     * memory is; any contiguous range of that many distinct lines displaces the caches the same way. A range
+     * of 2 MB or less starts at EA 0 as it always did, so every card that has an L2 of 1 MB or less, and the
+     * e300 cards, are unchanged.
+     */
+    if ((lines * CACHELINE_SIZE) > 0x200000)
+    {
+        base = PowerPCBase->pp_PPCMemBase + OFFSET_SYSMEM;
+    }
+
+    mem = base;
     for (i = 0; i < lines; i++)
     {
         dFlush(mem);
@@ -2814,14 +2831,14 @@ PPCKERNEL VOID FlushDCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
     }
     sync();
 
-    mem = 0;
+    mem = base;
     for (i = 0; i < lines; i++)
     {
         loadWord(mem);
         mem += CACHELINE_SIZE;
     }
 
-    mem = 0;
+    mem = base;
     for (i = 0; i < lines; i++)
     {
         dFlush(mem);
@@ -2881,6 +2898,37 @@ PPCKERNEL ULONG KCachedLine(__reg("r3") struct PrivatePPCBase* PowerPCBase, __re
 *
 *********************************************************************************************/
 
+PPCKERNEL VOID L2InvWait(VOID)
+{
+    /*
+     * C12 (REVIEW-LIB.md): WAITS FOR A GLOBAL L2 INVALIDATE TO FINISH, on the bit the part has. The MPC7400, the
+     * MPC7410 and the 750FX report it in L2CR[L2IP], bit 31 (MPC7410UM 3.7.3.7, PDF p. 235), and the caller then
+     * writes the next L2CR value, which clears L2I. The MPC745x's L2CR has no L2IP (a search of MPC7450UM.pdf for
+     * L2IP, 12 Nov, found 0 hits); its L2I, bit 10, is cleared by the chip when the invalidate completes (PDF p.
+     * 152), so the wait is on L2I itself, as setupCaches' 745x arm does it (setupppc.c, S6). The PVR upper halves
+     * 0x8000 to 0x8004 are the 745x and 744x, the range GetInfo and S6 use. 17.13b's .L2ENABLE sets L2E without an
+     * invalidate or a wait (ppcfunctions.p:138-151); WarpOS: NO COUNTERPART (a search of warpos/ for l2cr, l2wt,
+     * mfl2, mtl2 and L2E, 12 Nov, returns 0 lines).
+     */
+    ULONG pvrHi = getPVR() >> 16;
+
+    if ((pvrHi >= 0x8000) && (pvrHi <= 0x8004))
+    {
+        while (getL2State() & L2CR_L2I);
+    }
+    else
+    {
+        while (getL2State() & L2CR_L2IP);
+    }
+    return;
+}
+
+/********************************************************************************************
+*
+*
+*
+*********************************************************************************************/
+
 PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") ULONG flags, __reg("r5") APTR start, __reg("r6") ULONG length)
 {
     ULONG value;
@@ -2891,15 +2939,57 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
         {
             if (!(PowerPCBase->pp_CacheDState))
             {
-                /* C3: with the L2 whatever DisL2Flush says. Nothing stores
-                 * between this call's return and the HID0 write, so no line
-                 * is dirtied before the cache goes off. */
+                /*
+                 * C10 (REVIEW-LIB.md): THE L2 GOES OFF BEFORE THE DATA CACHE DOES. The MPC7410 manual:
+                 * "if the data cache is disabled, the L2 cache must also be disabled" (PDF p. 215, p.
+                 * 233, p. 110), and with the data cache off a load or a store is caching-inhibited on the
+                 * bus (p. 253) and can bypass an L2 that still holds the line, which DCACHEON would then
+                 * serve stale. The L2 is flushed with the L1 below, as L2CACHEOFF does it, so it is
+                 * switched off the same way; pp_L2OffByD records that DCACHEON has to switch it on again.
+                 * An L2 that was off before stays off. The cost: instruction misses go to memory too
+                 * (the L2 is unified) for as long as the data cache is off, which the manual asks for
+                 * whatever this arm does. 17.13b (ppcfunctions.p:250-274) and WarpOS's DCacheOff_S
+                 * (hal/warp.p:588-597) leave the L2 on: THIS DIVERGES from both, toward the manual.
+                 *
+                 * THE ORDER OF THE STORES, found by an independent review of the first build and seen on
+                 * the G4 (tests/l2dcache D1c and D2b failed on 96ff6b0d): a store made while the data
+                 * cache is still on is a modified line, and with DCE clear the L1 is not looked at (the
+                 * tag status bits are ignored, MPC7410UM PDF p. 216), so memory keeps the old value and
+                 * DCACHEON's flash invalidate throws the line away (p. 216: any modified data in the cache
+                 * will be lost). So pp_L2OffByD is stored BEFORE the flush, which writes it to memory
+                 * with everything else (the flush does not read it), and pp_CurrentL2Size AFTER the HID0
+                 * write, when a store goes to memory itself, as pp_CacheDState always has. NOTHING STORES
+                 * BETWEEN THE FLUSH'S RETURN AND THE HID0 WRITE (C3: with the L2 whatever DisL2Flush says).
+                 * 17.13b stores its DState byte after the HID0 write too (ppcfunctions.p:250-274, the store
+                 * at :269-270) and WarpOS's DCacheOff_S stores nothing there (hal/warp.p:588-597): THIS
+                 * MATCHES both on the order.
+                 */
+                if ((PowerPCBase->pp_DeviceID != DEVICE_MPC8343E) && (PowerPCBase->pp_DeviceID != DEVICE_MPC8314E))
+                {
+                    if (getL2State() & L2CR_L2E)
+                    {
+                        PowerPCBase->pp_L2OffByD = 1;
+                    }
+                }
+
                 FlushDCache(PowerPCBase, 1);
+
+                if (PowerPCBase->pp_L2OffByD)
+                {
+                    value = getL2State();
+                    value &= ~L2CR_L2E;
+                    setL2State(value);
+                }
 
                 value = getHID0();
                 value &= ~HID0_DCE;
                 setHID0(value);
                 PowerPCBase->pp_CacheDState = -1;
+
+                if (PowerPCBase->pp_L2OffByD)
+                {
+                    PowerPCBase->pp_CurrentL2Size = 0;
+                }
             }
             break;
         }
@@ -2927,6 +3017,27 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
                 flashInvD(value);
             }
             PowerPCBase->pp_CacheDState = 0;
+
+            /*
+             * C10: THE L2 THAT DCACHEOFF SWITCHED OFF COMES BACK, after the data cache (the L2 may be on
+             * only while the data cache is: MPC7410UM PDF p. 233), invalidated first and only if it is
+             * still off: L2I with L2E clear, a wait for the invalidate (L2InvWait: L2IP, or L2I on a
+             * 745x, C12), then L2E, as L2CACHEON does. An explicit L2CACHEOFF since the switch-off
+             * cleared the flag, and an L2 that a program switched on itself in the meantime is left as
+             * it is.
+             */
+            if (PowerPCBase->pp_L2OffByD)
+            {
+                PowerPCBase->pp_L2OffByD = 0;
+                value = getL2State();
+                if (!(value & L2CR_L2E))
+                {
+                    setL2State(value | L2CR_L2I);
+                    L2InvWait();
+                    setL2State(value | L2CR_L2E);
+                    PowerPCBase->pp_CurrentL2Size = PowerPCBase->pp_L2Size;
+                }
+            }
             break;
         }
         case CACHE_DCACHELOCK:
@@ -3104,16 +3215,32 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
                  * C4: AN L2 SWITCHED BACK ON IS INVALIDATED FIRST. Off, the L2
                  * keeps its lines; on again, they serve data memory has since
                  * changed. As setupCaches does it (setupppc.c): L2I with L2E
-                 * clear, wait for L2IP, then L2E -- only when it is off (L2I
-                 * on a running L2 would drop dirty lines) and there is an L2.
+                 * clear, wait for the invalidate (L2InvWait: L2IP, or L2I on a
+                 * 745x, C12), then L2E -- only when it is off (L2I on a running
+                 * L2 would drop dirty lines) and there is an L2.
                  * 17.13b (ppcfunctions.p:138-151) sets L2E alone: THIS
                  * DIVERGES, rightly.
+                 *
+                 * C12 (REVIEW-LIB.md): NOT WHILE THE DATA CACHE IS OFF. The L2 may be on only while the L1
+                 * data cache is (MPC7410UM PDF p. 110, 233); DCACHEOFF has switched it off for that reason,
+                 * and an L2CACHEON in that state put it back under a disabled data cache. With the data
+                 * cache off the request is recorded (pp_L2OffByD = 1, stored with the cache off, so it goes
+                 * to memory) and the L2 stays off; DCACHEON then switches it on, invalidated, as it does
+                 * for an L2 it switched off itself. 17.13b's .L2ENABLE sets L2E whatever the data cache is
+                 * doing (ppcfunctions.p:138-151): THIS DIVERGES, toward the manual. WarpOS: NO COUNTERPART
+                 * (a search of warpos/ for l2cr, l2wt, mfl2, mtl2 and L2E, 12 Nov, returns 0 lines). A
+                 * card without an L2 (pp_L2Size 0) keeps the old behavior.
                  */
+                if ((PowerPCBase->pp_CacheDState) && (PowerPCBase->pp_L2Size))
+                {
+                    PowerPCBase->pp_L2OffByD = 1;
+                    break;
+                }
                 value = getL2State();
                 if ((PowerPCBase->pp_L2Size) && !(value & L2CR_L2E))
                 {
                     setL2State(value | L2CR_L2I);
-                    while (getL2State() & L2CR_L2IP);
+                    L2InvWait();
                 }
                 value |= L2CR_L2E;
                 setL2State(value);
@@ -3127,13 +3254,38 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
                 value &= ~L2CR_L2E;
                 setL2State(value);
                 PowerPCBase->pp_CurrentL2Size = 0;
+                PowerPCBase->pp_L2OffByD = 0;              //C10: an explicit switch-off stays off after DCACHEON
                 break;
             }
             case CACHE_L2WTON:
             {
                 value = getL2State();
-                value |= L2CR_L2WT;
-                setL2State(value);
+                if ((value & L2CR_L2E) && !(value & L2CR_L2WT))
+                {
+                    /*
+                     * C11 (REVIEW-LIB.md): L2WT IS SET WITH THE L2 OFF. The MPC7410 manual, 3.7.3.5 (PDF
+                     * p. 234): "L2WT must never be set after the L2 cache has been enabled as previously
+                     * modified lines may get re-marked as exclusive", and an exclusive line is clean to the
+                     * L2 and is dropped, not written back, when it is replaced. So the order is the one
+                     * L2CACHEOFF and L2CACHEON already use: the flush with the L2, L2E clear, L2WT set, the
+                     * invalidate (L2I with L2E clear, a wait for it: L2InvWait), L2E. With the L2 off the bit is set
+                     * alone, as before. 17.13b's .L2WTENABLE sets the bit with L2E not looked at
+                     * (ppcfunctions.p:110-121): THIS DIVERGES, toward the manual. WarpOS: NO COUNTERPART.
+                     */
+                    FlushDCache(PowerPCBase, 1);
+                    value &= ~L2CR_L2E;
+                    setL2State(value);
+                    value |= L2CR_L2WT;
+                    setL2State(value);
+                    setL2State(value | L2CR_L2I);
+                    L2InvWait();
+                    setL2State(value | L2CR_L2E);
+                }
+                else
+                {
+                    value |= L2CR_L2WT;
+                    setL2State(value);
+                }
                 break;
             }
             case CACHE_L2WTOFF:

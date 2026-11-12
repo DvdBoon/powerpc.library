@@ -314,10 +314,15 @@
 .set L2_SIZE_1M_U,              0x0010
 .set L2_SIZE_2M_U,              0x0020
 
-.set L2CR_L2SIZ_2M,             0x00000000      # bits 2-3 2 MB; MPC7400 ONLY!
+.set L2CR_L2SIZ_2M,             0x00000000      # bits 2-3 2 MB: the MPC7400 and the MPC7410 (MPC7410UM PDF p. 110)
 .set L2CR_L2SIZ_1M,             0x30000000      # bits 2-3 1MB
 .set L2CR_L2SIZ_HM,             0x20000000      # bits 2-3 512K
-.set L2CR_L2SIZ_QM,             0x10000000      # bits 2-3 256K; MPC750 ONLY
+.set L2CR_L2SIZ_QM,             0x10000000      # bits 2-3 256K: also on the MPC7410 (PDF p. 110)
+.set L2CR_L2E,                  0x80000000      # bit 0 enable (S8: getL2Size)
+.set L2CR_DO,                   0x00400000      # bit 9 L2 data only on the 7400 and 7410 (MPC7410UM PDF p. 111)
+.set L2CR_L2I,                  0x00200000      # bit 10 global invalidate
+.set L2CR_L2IP,                 0x00000001      # bit 31 invalidate in progress
+.set L2_SCRATCH_END,            0x210000        # L2_SCRATCH_BYTES of constants.h: a 2 MB L2 plus two L1 data caches
 
 .set ibat4u,560
 .set ibat4l,561

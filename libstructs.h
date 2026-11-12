@@ -289,7 +289,13 @@ UBYTE                       pp_BusyCounter;
  * the two pad bytes that were here, so every field after it keeps its offset.
  */
 volatile UBYTE              pp_ExternalInt;
-UBYTE                       pp_BytePad;
+/*
+ * pp_L2OffByD (C10, REVIEW-LIB.md): set when SetCache(DCACHEOFF) switched an enabled L2 off together with the
+ * data cache, cleared by DCACHEON, which switches that L2 on again, and by L2CACHEOFF. The MPC7410 manual wants
+ * the L2 off whenever the L1 data cache is (PDF p. 215, 233). It takes the last pad byte that was here, so every
+ * field after it keeps its offset.
+ */
+UBYTE                       pp_L2OffByD;
 ULONG                       pp_NumAllTasks;
 ULONG                       pp_StartTBL;
 ULONG                       pp_CurrentTBL;

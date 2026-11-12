@@ -706,6 +706,30 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
         l2Clock = L2CR_L2CLK_2_5;
     }
 
+    /*
+     * S8, S6 (REVIEW-LIB.md): WHAT THE L2 ARMS NEED. pvrHi is the PVR's upper half: 0x000C is the MPC7400,
+     * 0x800C the MPC7410 (both have the 2 MB setting, MPC7410UM PDF p. 110), 0x8000 to 0x8004 the MPC745x.
+     * l2Scratch is the block that getL2Size fills to find the size of an external L2: L2_SCRATCH_GAP below
+     * the page table, which setupPPC has put at the top of the PPC memory (the table is at least 64 KB, as
+     * in mmuSetup), clear of what libinit.c allocated just below the table. The probe this replaces used the
+     * 1 MB that starts 4 MB below the top of the memory.
+     * S9: l2Scratch is a PHYSICAL address. getL2Size runs with address translation off, so that the table walks
+     * of the search cannot meet an L2 whose size is wrong (REVIEW-LIB.md S9; the manual's own L2 SRAM test starts
+     * with MSR[DR] = 0, MPC7410UM 3.7.9.2 step 1, PDF p. 245). System memory is mapped at MemBase + PA
+     * (mmuSetup: EA = id_MemBase + PA from PA OFFSET_SYSMEM to the top, and pp_PPCMemSize is that top), so the
+     * physical address of "the top, less the table, less L2_SCRATCH_GAP" has no MemBase in it.
+     */
+    ULONG pvrHi = getPVR() >> 16;
+    ULONG allow2M = ((pvrHi == 0x000C) || (pvrHi == 0x800C)) ? 1 : 0;
+    ULONG l2PtSize = PowerPCBase->pp_PageTableSize;
+    ULONG l2Scratch;
+
+    if (l2PtSize < 0x10000)
+    {
+        l2PtSize = 0x10000;
+    }
+    l2Scratch = PowerPCBase->pp_PPCMemSize - l2PtSize - L2_SCRATCH_GAP;
+
     switch (PowerPCBase->pp_DeviceID)
     {
         case DEVICE_HARRIER:
@@ -738,31 +762,89 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
                     num +=2;
                 }
             }
-            else
+            else if ((pvrHi >= 0x8000) && (pvrHi <= 0x8004))
             {
-                l2Setting = L2CR_L2SIZ_1M | l2Clock | L2CR_L2RAM_BURST | L2CR_TS;
+                /*
+                 * S6 (REVIEW-LIB.md): THE MPC745x, PVR UPPER HALF 0x8000 TO 0x8004 (the range GetInfo
+                 * takes for the 745x and 744x). It used to fall into the branch below, which writes the
+                 * 7410's layout into a register that has another one (L2CR, MPC7450UM Table 2-12: bits
+                 * 2-3 must be 0b00, 4-9 are reserved, no clock, size or test-support field), and polls
+                 * L2IP, bit 31, which the part does not define, so the L2 could be enabled before its
+                 * invalidate was done; it also left HID0[TBEN] clear: HID0 resets to 0x80000000 (Table
+                 * 2-45), and the time base and the decrementer run only with TBEN set (Table 2-7).
+                 * Now: TBEN is set with an isync after the mtspr (setHID0 ends in one; Table 2-7 note 1);
+                 * the on-chip L2 is invalidated and enabled as 3.6.3.1.1 (PDF p. 295) has it, polling
+                 * L2I, bit 10, which the chip clears when the invalidate is done; its size is the part's
+                 * (256 KB for 0x8000 and 0x8001, 512 KB for 0x8002 and 0x8003, 1 MB for 0x8004: PDF
+                 * pp. 60, 78 and 245); and the speed comes from 17.13b's table for 0x8000 with HID1 bits
+                 * 15-19 (setupppc.p:1212-1224), and stays 0 for 0x8001 to 0x8004, whose tables are in
+                 * the hardware specifications. 17.13b sets TBEN for 0x8000 only, without the isync
+                 * (setupppc.p:585-592), and programs the 750FX's L2 sequence for it (:1106-1137): THIS
+                 * DIVERGES in the PVR range, the isync and the poll. WarpOS: NO COUNTERPART (a search
+                 * of warpos/ for TBEN and l2cr returns no line). Checked against the object and the
+                 * manual; no 745x card has run it.
+                 */
+                if (pvrHi == 0x8004)
+                {
+                    l2Size = L2_SIZE_1M;
+                }
+                else if (pvrHi >= 0x8002)
+                {
+                    l2Size = L2_SIZE_HM;
+                }
+                else
+                {
+                    l2Size = L2_SIZE_QM;
+                }
+
+                value0 |= HID0_TBEN;
+                setHID0(value0);
 
                 if (!(getL2CR() & L2CR_L2E))
                 {
-                    setL2CR(l2Setting | L2CR_L2I);
-                    while (getL2CR() & L2CR_L2IP);
-                    setL2CR(l2Setting | L2CR_L2E);
+                    setL2CR(L2CR_L2I);
+                    while (getL2CR() & L2CR_L2I);
+                    setL2CR(L2CR_L2E);
                 }
 
-                l2Setting |= L2CR_L2E;
-
-                setL2CR(l2Setting);
-                getL2Size(PowerPCBase->pp_PPCMemBase + PowerPCBase->pp_PPCMemSize, (APTR)&cz);
-
-                l2Setting &= ~L2CR_TS;
-                if (cz.cz_SizeBit)
+                if (pvrHi == 0x8000)
                 {
-                    l2Setting &= ~L2CR_L2SIZ_1M;
-                    l2Setting |= cz.cz_SizeBit;
-                }
+                    pll = (value1 >> 12) & 0x1f;
 
-                setL2CR(l2Setting);
+                    ULONG* pllTable = getTableVGer();
+
+                    while (pllTable[num])
+                    {
+                        if (pllTable[num] == pll)
+                        {
+                            PowerPCBase->pp_CPUSpeed = pllTable[num+1];
+                            break;
+                        }
+                        num +=2;
+                    }
+                }
+            }
+            else
+            {
+                /*
+                 * S8 (REVIEW-LIB.md): the L2's size is found by function, largest first, with the L2
+                 * disabled (getL2Size, setupppc.s), and the final L2CR is written with the size bits,
+                 * invalidated and enabled in the manual's order (MPC7410UM 3.7.5, PDF p. 240). It used
+                 * to program 1 MB with test support, enable the L2, count the surviving test lines,
+                 * and then write the size bits with L2E set; its 2 MB test was commented out, as in
+                 * 17.13b (setupppc.p:1172-1174), so a 2 MB L2 ran as 1 MB. cz_SizeBytes is 0 only if
+                 * getL2Size did not run: it always returns a size (1 MB when nothing reads back clean).
+                 */
+                l2Setting = l2Clock | L2CR_L2RAM_BURST;
+
+                getL2Size(l2Scratch, (APTR)&cz, l2Setting, allow2M);
+
+                l2Setting |= cz.cz_SizeBit;
                 l2Size = cz.cz_SizeBytes;
+
+                setL2CR(l2Setting | L2CR_L2I);
+                while (getL2CR() & L2CR_L2IP);
+                setL2CR(l2Setting | L2CR_L2E);
 
                 pll = value1 >> 28;
 
@@ -824,29 +906,18 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
             value0 |= HID0_ICE | HID0_DCE | HID0_SGE | HID0_BTIC | HID0_BHTE;
             setHID0(value0);
 
-            l2Setting = L2CR_L2SIZ_1M | l2Clock | L2CR_L2RAM_BURST | L2CR_TS;
+            /* S8: as the Harrier's branch above: the size by function with the L2 off, then the final L2CR,
+             * the invalidate and the enable. 2 MB only on a 7400 or a 7410 (allow2M). */
+            l2Setting = l2Clock | L2CR_L2RAM_BURST;
 
-            if (!(getL2CR() & L2CR_L2E))
-            {
-                setL2CR(l2Setting | L2CR_L2I);
-                while (getL2CR() & L2CR_L2IP);
-                setL2CR(l2Setting | L2CR_L2E);
-            }
+            getL2Size(l2Scratch, (APTR)&cz, l2Setting, allow2M);
 
-            l2Setting |= L2CR_L2E;
-
-            setL2CR(l2Setting);
-            getL2Size(PowerPCBase->pp_PPCMemBase + PowerPCBase->pp_PPCMemSize, (APTR)&cz);
-
-            l2Setting &= ~L2CR_TS;
-            if (cz.cz_SizeBit)
-            {
-                l2Setting &= ~L2CR_L2SIZ_1M;
-                l2Setting |= cz.cz_SizeBit;
-            }
-
-            setL2CR(l2Setting);
+            l2Setting |= cz.cz_SizeBit;
             l2Size = cz.cz_SizeBytes;
+
+            setL2CR(l2Setting | L2CR_L2I);
+            while (getL2CR() & L2CR_L2IP);
+            setL2CR(l2Setting | L2CR_L2E);
 
             ULONG* pllTable;
             pll = value1 >> 28;

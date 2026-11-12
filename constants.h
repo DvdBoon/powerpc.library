@@ -362,10 +362,10 @@
 
 #define L2CR_L2E                0x80000000      /* bit 0 - enable */
 #define L2CR_L2PE               0x40000000      /* bit 1 - data parity */
-#define L2CR_L2SIZ_2M           0x00000000      /* bits 2-3 2 MB; MPC7400 ONLY! */
+#define L2CR_L2SIZ_2M           0x00000000      /* bits 2-3 2 MB: the MPC7400 and the MPC7410 (MPC7410UM PDF p. 110) */
 #define L2CR_L2SIZ_1M           0x30000000      /* bits 2-3 1MB */
 #define L2CR_L2SIZ_HM           0x20000000      /* bits 2-3 512K */
-#define L2CR_L2SIZ_QM           0x10000000      /* bits 2-3 256K; MPC750 ONLY */
+#define L2CR_L2SIZ_QM           0x10000000      /* bits 2-3 256K: also on the MPC7410 (PDF p. 110) */
 #define L2CR_L2CLK_1            0x02000000      /* bits 4-6 Clock Ratio div 1 */
 #define L2CR_L2CLK_1_5          0x04000000      /* bits 4-6 Clock Ratio div 1.5 */
 #define L2CR_L2CLK_2            0x08000000      /* bits 4-6 Clock Ratio div 2 */
@@ -373,12 +373,12 @@
 #define L2CR_L2CLK_3            0x0c000000      /* bits 4-6 Clock Ratio div 3 */
 #define L2CR_L2CLK_4            0x0e000000      /* bits 4-6 Clock Ratio div 4 */
 #define L2CR_L2RAM_BURST        0x01000000      /* bits 7-8 burst SRAM */
-#define L2CR_DO                 0x00400000      /* bit 9 Disable caching of instr. in L2 (Not 7450) */
+#define L2CR_DO                 0x00400000      /* bit 9 L2 data only on the 7400 and 7410 (MPC7410UM PDF p. 111): an instruction miss does not reload the L2 (Not 7450) */
 #define L2CR_L2I                0x00200000      /* bit 10 Global invalidate bit */
-#define L2CR_L2IO               0x00100000      /* bit 11 L2 Instruction only (disables data cache) */
+#define L2CR_L2IO               0x00100000      /* bit 11: the MPC7450's instruction-only bit (17.13b's FlushVGerCache uses it so); on the 7400 and 7410 bit 11 is L2CTL and L2IO is bit 21 */
 #define L2CR_L2WT               0x00080000      /* bit 12 write-through */
 #define L2CR_TS                 0x00040000      /* bit 13 Test support on */
-#define L2CR_L2DO               0x00010000      /* bit 15 L2 Data only (disables instruction cache) */
+#define L2CR_L2DO               0x00010000      /* bit 15: the MPC7450's data-only bit; on the 7400 and 7410 it is the low bit of L2OH and L2DO is bit 9, L2CR_DO above */
 #define L2CR_L2HWF              0x00000800      /* bit 20 L2 Hardware Flush (not 7400/750) */
 #define L2CR_L2OH_5             0x00000000      /* bits 14-15 Output Hold time = 0.5ns */
 #define L2CR_L2OH_1             0x00010000      /* bits 14-15 Output Hold time = 1.0ns */
@@ -393,6 +393,13 @@
 
 #define L2_SIZE_1M_U            0x0010
 #define L2_SIZE_2M_U            0x0020
+
+/* S8 (REVIEW-LIB.md): where setupCaches finds the L2's size. The scratch block that getL2Size fills starts
+ * L2_SCRATCH_GAP below the page table, which sits at the top of the PPC memory, so it is clear of the library's own
+ * structures that libinit.c allocates just below that table (the base, the functions, the exception stack); it is
+ * L2_SCRATCH_BYTES long, a 2 MB L2 plus two L1 data caches, the range a whole-cache displacement flush has to cover. */
+#define L2_SCRATCH_GAP          0x600000
+#define L2_SCRATCH_BYTES        0x210000
 
 //Bit defines for the HID0 register
 

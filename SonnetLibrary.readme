@@ -338,9 +338,20 @@ Caches and floating point:
   now.
 - An L2 whose size cannot be measured at start-up is taken as 1 MB (it was 256
   MB, and a flush of the whole data cache crashed the program).
+- The L2 size is found by a data check, largest first (2 MB on a 7400 or 7410,
+  then 1 MB, 512 KB and 256 KB); a 2 MB L2 was run as 1 MB. The check runs
+  with address translation off, and the L2 is switched off before each
+  invalidate.
 - GetInfo() reads the cache state, the page table and the L2 from the CPU at
   the call (after a SetCache() it showed the old state), and its L2 tags answer
   on/off as 1 or 0, the write-through state and the size in use, as in 17.13b.
+- SetCache(DCACHEOFF) switches an enabled L2 off together with the data cache
+  and DCACHEON switches it on again (the manual wants the L2 off whenever the
+  data cache is off); an L2CACHEON made while the data cache is off waits for
+  DCACHEON.
+- SetCache(L2WTON) on an enabled L2 flushes it, switches it off, sets
+  write-through, invalidates it and switches it on again (the manual forbids
+  setting the bit while the L2 runs).
 - Floating-point accesses a G3 or G4 hands to software: a negative
   displacement of a misaligned access is signed now (it went 64 KB too far),
   lfdu, stfdu, lfsux, lfdx, lfdux, stfsux, stfdx, stfdux, stfiwx and dcbz are
@@ -379,6 +390,9 @@ Start-up and cards:
   call it. The NICE table sits in the library's own memory, as in 17.13b.
   SetHardware(HW_BRANCHTRACEOFF) clears the branch trace bit and not the
   single-step bit.
+- MPC745x boards: the time base and decrementer are switched on (HID0 TBEN)
+  and the on-chip L2 is set up with its own sequence, whose invalidate is
+  waited for on L2I (not run on a 745x board).
 
 Program loader and process exit:
 - With SetCPUComm set, hunks that asked for FAST or CHIP memory are loaded

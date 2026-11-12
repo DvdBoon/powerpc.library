@@ -24,7 +24,7 @@
 
 .global     _GetNiceTable
 .global     _setupPPC, _Reset, _GetExcTable, _GetVecEntry
-.global     _getTableFX, _getTable100, _getTable66
+.global     _getTableFX, _getTable100, _getTable66, _getTableVGer
 .global     _getL2Size, _detectMem
 
 #*********************************************************
@@ -225,66 +225,190 @@ ifpdr_value:
 
 #*********************************************************
 
+#
+# VOID getL2Size(ULONG scratch, APTR cz, ULONG l2Setting, ULONG allow2M)
+#       r3 = scratch (a PHYSICAL address: S9), r4 = cz, r5 = l2Setting, r6 = allow2M
+#
+# S8 (REVIEW-LIB.md). THE L2'S SIZE, FOUND BY FUNCTION, LARGEST FIRST. The probe that was here wrote 1 MB into
+# an L2 set to 1 MB and COUNTED the 256-byte steps that survived (0x1000, 0x800 or 0x400): the count cannot exceed
+# 0x1000, so a 2 MB L2 was taken for a 1 MB one (the 2 MB test was commented out, as in 17.13b,
+# setupppc.p:1172-1174), and the exact count could come out one or two short, because the probe's own code is
+# fetched through the L2 after the test lines are in. Now, for each candidate size C from 2 MB (allow2M: the 7400
+# and the 7410) down to 256 KB, with L2E clear: L2CR = l2Setting | the size bits of C | L2CR_DO (data only: an
+# instruction miss does not reload the L2, so no line of this code is in an L2 whose size is wrong), then the
+# global invalidate, then L2E; every 32-byte line of a C-byte block gets a word of its own, and every word is
+# read back. A candidate larger than the SRAM indexes the data RAM beyond its range, so two lines share a cell
+# and one of them reads back the other's word: the first candidate that reads back clean is the size. That is
+# the manual's order (3.7.5): the size is set with L2E clear and the L2 is invalidated before it is enabled.
+# THE FLUSH FIRST. The L1 data cache and the L2 are flushed by displacement before anything is invalidated (a
+# dcbf of the range, a load of it, a dcbf again: kernel.c FlushDCache's recipe), so no modified line of anyone's
+# is in a cache when the global invalidate throws the L2's lines away; the routine touches nothing but registers
+# and the scratch block (its one other store is the result, after the L2 is off again). The scratch lines are
+# flushed (dcbf) when a candidate is done, so no modified line of the block stays in a cache for memory that is
+# somebody else's later.
+# NOTHING READS BACK CLEAN (not even 256 KB): 1 MB, as S2 decided; the caller then programs 1 MB.
+# Returns with the L2 DISABLED. cz_SizeBit is the L2SIZ field (0 for 2 MB: test cz_SizeBytes, not the bits),
+# cz_SizeBytes the size in 256-byte lines. The caller writes the final L2CR, invalidates and enables.
+# S9 (REVIEW-LIB.md): THE PASSES RUN IN REAL ADDRESSING MODE. A candidate larger than the SRAM makes two L2 lines
+# share a cell, and the L2 holds other lines too: the page-table lines that the hardware table walk reads for the
+# scratch pages (about 1500 walks per 2 MB pass), cast out of the L1 into the L2, which is a victim cache. A scratch
+# line written into a cell that a page-table line shares leaves the next walk that hits it with garbage: a DSI in
+# the set-up code, which has no handler yet. So MSR[DR] is cleared (and MSR[EE]) for the whole routine, the MSR
+# kept in CTR: no table walks, and r3 is a PHYSICAL address (the caller passes the scratch's EA minus MemBase:
+# system memory is mapped at MemBase + PA, setupppc.c mmuSetup). Real mode generates WIMG 0b0011 (write-back,
+# cacheable, coherent, guarded: MPC7410UM PDF p. 188, p. 305), and the manual's own L2 SRAM test starts with
+# MSR[DR] = 0 for that (3.7.9.2 step 1, PDF p. 245). The MSR is put back before the result is stored (r4 is an EA).
+# 17.13b's probe (setupppc.p:1146-1170) has no mtmsr of its own; WarpOS: NO COUNTERPART (a search of warpos/ for
+# l2cr, l2wt, mfl2, mtl2 and L2E, 12 Nov, returns 0 lines).
+# P2 (REVIEW-LIB.md S8): L2E IS CLEARED ON ITS OWN, with a sync each side, before any L2I is set: the manual's order
+# (3.7.3.7 steps 3 and 4, PDF p. 235; L2I must never be set while L2E is), for an L2 that is on at entry. 17.13b
+# writes the configuration with E clear and syncs before it sets L2I in a second write (setupppc.p:1121-1127).
+
 _getL2Size:
-        mr      r6,r3                   #Determine size of L2 Cache
-        mr      r3,r4
-        li      r5,0
-        mr      r8,r5
-        lis     r4,0
+        mfmsr   r0
+        mtctr   r0                      #the MSR as found, in CTR (r0 and r3-r12 are all in use below)
+        rlwinm  r0,r0,0,17,15           #MSR[EE] clear
+        rlwinm  r0,r0,0,28,26           #MSR[DR] clear: real addressing from here to the end, r3 is physical
+        sync
+        mtmsr   r0
+        isync
 
-        subis   r6,r6,0x40              #Substract 4 MB
-        lis     r5,L2_SIZE_1M_U         #Size of memory to write to
+        lis     r8,L2_SCRATCH_END@h     #the range: 2 MB plus two L1 data caches
+        li      r7,0
+.L2FlushA:
+        dcbf    r7,r3
+        addi    r7,r7,32
+        cmplw   r7,r8
+        blt     .L2FlushA
+        sync
+        li      r7,0
+.L2FlushB:
+        lwzx    r0,r7,r3
+        addi    r7,r7,32
+        cmplw   r7,r8
+        blt     .L2FlushB
+        li      r7,0
+.L2FlushC:
+        dcbf    r7,r3
+        addi    r7,r7,32
+        cmplw   r7,r8
+        blt     .L2FlushC
+        sync
 
-.L2SzWriteLoop:
-        dcbz    r4,r6
-        stwx    r4,r4,r6
-        dcbf    r4,r6
-        addi    r4,r4,L2_ADR_INCR
-        cmpw    r4,r5
-        blt     .L2SzWriteLoop
+        mfl2cr  r0                      #P2: L2E clear on its own, a sync each side, before any L2I (an L2 that is on)
+        rlwinm  r0,r0,0,1,31
+        mtl2cr  r0
+        sync
+        isync
 
-        lis     r4,0
+        li      r12,0                   #the candidate: 0 2 MB, 1 1 MB, 2 512 KB, 3 256 KB
+        cmpwi   r6,0
+        bne     .L2Cand
+        li      r12,1                   #no 2 MB on a part that does not have the setting
 
-.L2SzReadLoop:
-        lwzx    r7,r4,r6
-        cmpw    r4,r7
-        bne     .L2SkipCount
-        addi    r8,r8,1                 #Count cache lines
+.L2Cand:
+        cmpwi   r12,0
+        bne     .L2Cand1
+        li      r10,0                   #2 MB: L2SIZ 0b00
+        lis     r11,0x20
+        b       .L2CandSet
 
-.L2SkipCount:
-        dcbi    r4,r6
-        addi    r4,r4,L2_ADR_INCR
-        cmpw    r4,r5
-        blt     .L2SzReadLoop
+.L2Cand1:
+        cmpwi   r12,1
+        bne     .L2Cand2
+        lis     r10,L2CR_L2SIZ_1M@h
+        lis     r11,0x10
+        b       .L2CandSet
 
-#       lis     r7,L2CR_L2SIZ_2M@h
-#       cmpwi   r8,L2_SIZE_2M
-#       beq     .L2SizeDone
+.L2Cand2:
+        cmpwi   r12,2
+        bne     .L2Cand3
+        lis     r10,L2CR_L2SIZ_HM@h
+        lis     r11,0x8
+        b       .L2CandSet
 
-        lis     r7,L2CR_L2SIZ_1M@h
-        cmpwi   r8,L2_SIZE_1M
-        beq     .L2SizeDone
+.L2Cand3:
+        lis     r10,L2CR_L2SIZ_QM@h
+        lis     r11,0x4
 
-        lis     r7,L2CR_L2SIZ_HM@h
-        cmpwi   r8,L2_SIZE_HM
-        beq     .L2SizeDone
+.L2CandSet:
+        or      r9,r5,r10
+        oris    r9,r9,L2CR_DO@h
+        oris    r0,r9,L2CR_L2I@h
+        mtl2cr  r0                      #L2E clear: the clock, the size, data only, and the invalidate
+        sync
 
-        lis     r7,L2CR_L2SIZ_QM@h
-        cmpwi   r8,L2_SIZE_QM
-        beq     .L2SizeDone
+.L2WaitI:
+        mfl2cr  r0
+        andi.   r0,r0,L2CR_L2IP
+        bne     .L2WaitI
 
-        lis     r7,0                    #No size bits: the L2CR keeps the 1 MB it was set to
-        li      r8,L2_SIZE_1M           #S2 (REVIEW-LIB.md): 1 MB in 256-byte lines, that size.
-                                        #This was "mr r8,r5", 0x100000 BYTES where a line count
-                                        #is returned, which setupCaches makes a 256 MB L2: the
-                                        #whole-cache flush then ran past memory. 17.13b keeps the
-                                        #measured count (setupppc.p:1185-1201). WarpOS sizes no L2;
-                                        #its L1 lookup keeps a safe maximum when the CPU is not in
-                                        #its table (warpos/hal/warp.p:2840-2858)
+        oris    r0,r9,L2CR_L2E@h
+        mtl2cr  r0
+        sync
+        isync
 
-.L2SizeDone:
-        stw     r7,0(r3)
-        stw     r8,4(r3)
+        loadreg r9,0x5A5A5A5A           #the word of a line: its offset xor this xor the size, so another
+        xor     r9,r9,r11               #candidate's words from an earlier pass never match
+        li      r7,0
+.L2Wr:
+        add     r8,r3,r7
+        dcbz    0,r8
+        xor     r0,r7,r9
+        stw     r0,0(r8)
+        addi    r7,r7,32
+        cmplw   r7,r11
+        blt     .L2Wr
+        sync
+
+        li      r7,0
+.L2Rd:
+        add     r8,r3,r7
+        lwz     r6,0(r8)
+        xor     r0,r7,r9
+        cmplw   r6,r0
+        bne     .L2Bad
+        addi    r7,r7,32
+        cmplw   r7,r11
+        blt     .L2Rd
+        li      r6,0                    #clean
+        b       .L2Done
+
+.L2Bad:
+        li      r6,1
+
+.L2Done:
+        li      r7,0
+.L2FlushD:
+        add     r8,r3,r7
+        dcbf    0,r8
+        addi    r7,r7,32
+        cmplw   r7,r11
+        blt     .L2FlushD
+        sync
+
+        or      r0,r5,r10               #the L2 off again: the candidate's bits, E clear
+        oris    r0,r0,L2CR_DO@h
+        mtl2cr  r0
+        sync
+        isync
+
+        cmpwi   r6,0
+        beq     .L2Found
+        addi    r12,r12,1
+        cmpwi   r12,4
+        blt     .L2Cand
+
+        lis     r10,L2CR_L2SIZ_1M@h     #nothing read back clean: 1 MB (S2)
+        lis     r11,0x10
+
+.L2Found:
+        rlwinm  r11,r11,24,8,31         #the size in bytes to 256-byte lines
+        mfctr   r0                      #S9: the MSR as found, translation back on, before r4 (an EA) is used
+        mtmsr   r0
+        isync
+        stw     r10,0(r4)
+        stw     r11,4(r4)
         blr
 
 #*********************************************************
@@ -320,6 +444,18 @@ _getTable66:
         .long	0b1101,400000000,0b0001,500000000
         .long	0b0101,433333333,0b0010,466666666
         .long	0b1100,533333333,0
+
+#*********************************************************
+
+# S6: the MPC7450's table, 17.13b's .PLL_CFG_VGER (setupppc.p:1221-1224): PLL_CFG, HID1 bits 15-19, to the CPU's speed.
+_getTableVGer:
+        mflr    r4
+        bl      .EndTable
+
+        .long	0b11010,600000000,0b01010,650000000
+        .long	0b00100,700000000,0b00010,750000000
+        .long	0b11000,800000000,0b01100,850000000
+        .long	0b01111,900000000,0
 
 #*********************************************************
 

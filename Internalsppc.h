@@ -401,6 +401,7 @@ ULONG CommonExcHandler(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct ifra
 void CommonExcError(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct iframe* iframe);
 VOID CPUStats(__r3 struct PrivatePPCBase* PowerPCBase);
 VOID FlushDCache(__r3 struct PrivatePPCBase* PowerPCBase, __r4 ULONG withL2);
+VOID L2InvWait(VOID);
 VOID EndTask(VOID);
 ULONG GetLen(__r3 STRPTR string);
 STRPTR CopyStr(__r3 APTR source, __r4 APTR dest);
@@ -440,7 +441,12 @@ VOID  NiceTable(VOID);                  /* supportppc.s: the NICE weighting tabl
 ULONG* getTableFX(VOID);
 ULONG* getTable100(VOID);
 ULONG* getTable66(VOID);
-VOID getL2Size(ULONG testmem, APTR cz);
+ULONG* getTableVGer(VOID);              /* S6: the MPC7450's PLL table (setupppc.s), 17.13b's .PLL_CFG_VGER */
+/* S8: finds the size of an external L2 by function. scratch: a block of L2_SCRATCH_BYTES, 32-byte aligned, that is
+ * free; cz: filled with the L2SIZ bits and the size in 256-byte lines; l2Setting: the L2CR bits that are not the
+ * size (clock, RAM type), without E, I, test support or data-only; allow2M: 1 on a 7400 or 7410. Returns with the
+ * L2 disabled and flushed, its size bits NOT set: the caller writes the final L2CR, invalidates and enables. */
+VOID getL2Size(ULONG scratch, APTR cz, ULONG l2Setting, ULONG allow2M);
 VOID detectMem(struct MemSettings* ms);
 #if 0
 VOID writememLongPPC(ULONG Base, ULONG offset, ULONG value);
