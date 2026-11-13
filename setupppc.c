@@ -492,6 +492,8 @@ PPCSETUP void setupFIFOs(__reg("r3") struct InitData* initData)
             baseFIFO->kf_MIOFT = memBase + memOF + 4;
             baseFIFO->kf_MIOPT = memBase + memOP;
             baseFIFO->kf_MIOPH = memBase + memOP;
+            baseFIFO->kf_Doorbell = 0;              //the PCIe M1's doorbell count and the count acted on (E9)
+            baseFIFO->kf_DoorbellSeen = 0;
 
             break;
         }
@@ -1227,8 +1229,33 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
         }
         case DEVICE_MPC8314E:
         {
-            quantum = QUANTUM_E300 >> 1;
-            busclock = BUSCLOCK_E300 >> 1;
+            quantum = QUANTUM_E300;
+            busclock = BUSCLOCK_E300;
+
+            /*
+             * S10: THE PCIe M1's CLOCKS FOLLOW RCWLR, AS THE MPC8343E's DO (S4 above). The
+             * two constants were halved whatever the strap: right on a card strapped DDRCM
+             * 1, which is the one board read so far (RCWLR 0x44060000, 6 Nov 2026), and
+             * twice too fast, time conversions and task slice alike, on one strapped DDRCM
+             * 0. The MPC8315E RM's RCWLR (Rev. 2, Figure 4-3 and Table 4-8, PDF p. 181) has
+             * DDRCM at bit 1 as the MPC8343E's does, 0x40000000: set, the DDR controller
+             * runs at twice csb_clk, which the quantum and the time base follow. RCWLR is
+             * an ordinary big-endian CCSR register in the reset configuration block at
+             * 0x900 (Table 3-1, PDF p. 166), so the read is readmemLongPPC (lwzx), as in
+             * the MPC8343E's case. The model is the same: the DDR clock is the table's
+             * value and csb_clk is that divided by one plus DDRCM; a card with another DDR
+             * clock is served by neither this nor the constants (REVIEW-LIB.md S10, option
+             * C). 17.13b reads RCWLR in one place, its K1 branch (setupppc.p:484-492; a
+             * search of src_173b finds the name there and in ppcdefines.i:1046 alone) and
+             * has no PCIe M1; WarpOS: NO COUNTERPART (a search of warpos/ for RCWLR,
+             * DDRCM, MPC8314, MPC8315 and MPC8343 returns no line, 12 Nov 2026).
+             * tests/rcwlr decodes this card's word and checks the clocks.
+             */
+            if (readmemLongPPC(IMMR_ADDR_DEFAULT, IMMR_RCWLR) & (0x80000000UL >> RCWLR_DDRCM))
+            {
+                quantum = quantum >> 1;
+                busclock = busclock >> 1;
+            }
             writememLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_IMBCR, 0);
             writememLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_CSMISR, readmemLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_CSMISR));
             //storePCI16(IMMR_ADDR_DEFAULT, IMMR_PEX_MSICR, (loadPCI16(IMMR_ADDR_DEFAULT, IMMR_PEX_MSICR) | PEX_MISCR_MSIE));

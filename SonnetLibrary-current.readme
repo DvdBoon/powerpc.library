@@ -230,7 +230,8 @@ Exceptions:
   gets a handle now, which RemExcHandler() frees), and queued changes could be
   moved while a list function was half done.
 - CauseInterrupt() runs the EXCF_INTERRUPT handlers before it returns, as
-  under WarpOS; CausePPCInterrupt() from a 68k program works on a Harrier.
+  under WarpOS; CausePPCInterrupt() from a 68k program works on a Harrier,
+  and on the PCIe M1, where it did nothing.
 - From an exception handler, SetCache(), Signal68K() and a reply to a 68k
   message hung or crashed the PPC; they call the kernel directly now, as
   WarpOS's SetCache does.
@@ -318,6 +319,9 @@ Messages, pools and memory calls:
   list as the predecessor sets the node's back link (RemovePPC(), RemTailPPC()
   and a walk back from the last node went through a stale link), as 17.13b and
   WarpOS do.
+- K1/M1: a call from the PPC to the 68k is quicker; the 68k no longer clears
+  the reply's message frame (the reply fills it) and reads each queue pointer
+  once, as 17.13b does.
 
 Caches and floating point:
 - SetCache() on a card without an L2 (K1, M1) flushes and invalidates the
@@ -391,6 +395,8 @@ Start-up and cards:
   read now (the PCIe M1 likewise, not run there).
 - K1/M1 (PCI): the bus clock and the task slice follow the board's DDRCM
   strap; the reset word was read byte-reversed and the wrong bit tested.
+- PCIe M1: the bus clock and the task slice follow its DDRCM strap too (they
+  were halved whatever the strap).
 - MPC107: the wait for the PPC's first exception at start-up is bounded (a PPC
   that stopped hung ramlib for good) and ends with "PowerPC CPU stopped after
   setup" (not run on an MPC107 board).

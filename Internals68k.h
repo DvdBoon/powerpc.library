@@ -88,6 +88,7 @@ ULONG  ChangeStackRamLib(__reg("d0") ULONG size, __reg("a6")struct ExecBase* Sys
 ULONG  GortInt      (__reg("a1") APTR data, __reg("a5") APTR code);
 
 struct MsgFrame*  CreateMsgFrame(struct PrivatePPCBase* PowerPCBase);
+struct MsgFrame*  CreateMsgFrameNoClear(struct PrivatePPCBase* PowerPCBase);
 void              SendMsgFrame  (struct PrivatePPCBase* PowerPCBase, struct MsgFrame* msgFrame);
 void              FreeMsgFrame  (struct PrivatePPCBase* PowerPCBase, struct MsgFrame* msgFrame);
 struct MsgFrame*  GetMsgFrame   (struct PrivatePPCBase* PowerPCBase);

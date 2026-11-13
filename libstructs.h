@@ -371,6 +371,20 @@ ULONG                       kf_MIOFT;
 ULONG                       kf_MIOPH;
 ULONG                       kf_MIIFH;
 ULONG                       kf_MIIPT;
+/*
+ * THE PCIe M1's DOORBELL (E9, REVIEW-LIB.md). The 68k's CausePPCInterrupt adds 1 to
+ * kf_Doorbell, in PPC RAM on a cache line of its own (offset 0x40), and then sets
+ * PEX_IMBCR[READY], the interrupt a posted frame raises. The kernel's PCIe arm acts
+ * on a count that differs from kf_DoorbellSeen, which only the PPC writes (offset
+ * 0x60, a line of its own). Appended: no earlier offset moves; the area between
+ * FIFO_END + 0x30 and FIFO_END + 0x100, where the crash data starts, holds nothing
+ * else (a search of lib/ for FIFO_END finds the structure and the offsets 0x100 and
+ * 0x14C only, 12 Nov 2026).
+ */
+ULONG                       kf_Pad[4];
+volatile ULONG              kf_Doorbell;
+ULONG                       kf_Pad2[7];
+volatile ULONG              kf_DoorbellSeen;
 };
 
 /*

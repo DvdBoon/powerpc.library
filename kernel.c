@@ -330,7 +330,7 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                     }
                     break;
 		        }
-                case DEVICE_MPC8314E: //CausePPCInterrupt should be handled here
+                case DEVICE_MPC8314E: //the 68k's CausePPCInterrupt: kf_Doorbell, below (E9)
                 {
                     /*
                      * Q5, the PCIe M1's half: the order of the MPC8343E's arm above. The
@@ -342,6 +342,28 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                      */
                     writememLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_IMBCR, 0);
                     writememLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_CSMISR, readmemLongPPC(IMMR_ADDR_DEFAULT, IMMR_PEX_CSMISR));
+
+                    /*
+                     * E9: THE PCIe M1's CausePPCInterrupt. The 68k adds 1 to kf_Doorbell and then
+                     * sets IMBCR[READY], the interrupt a frame post raises; a count that differs
+                     * from kf_DoorbellSeen, which only this code writes, runs the EXCF_INTERRUPT
+                     * handlers, as the MPC8343E's doorbell does. It is read AFTER the clears
+                     * above: a doorbell whose READY came before them had its count written before
+                     * them too, and one that comes later raises the interrupt again. A count and
+                     * not a flag: this code never stores into the 68k's word, so no doorbell is
+                     * wiped, and two close together may share one call, as on the other cards.
+                     * 17.13b has no PCIe M1 (powerpc.s:4411-4433: K1, Harrier, MPC107) and WarpOS's
+                     * CausePPCInterrupt is Phase5's InvokeInterrupt (powerpc.s:1446-1458): NO
+                     * COUNTERPART.
+                     */
+                    struct killFIFO* bellFIFO = (struct killFIFO*)((ULONG)(PowerPCBase->pp_PPCMemBase + FIFO_END));
+                    ULONG bell = bellFIFO->kf_Doorbell;
+
+                    if (bell != bellFIFO->kf_DoorbellSeen)
+                    {
+                        bellFIFO->kf_DoorbellSeen = bell;
+                        CommonExcHandler(PowerPCBase, iframe, (struct List*)&PowerPCBase->pp_ExcInterrupt);
+                    }
 
                     struct MsgFrame* msgFrame;
 

@@ -599,7 +599,8 @@ LIBFUNC68K LONG myWaitForPPC(__reg("a6") struct PrivatePPCBase* PowerPCBase, __r
 
                     Run68KCode(SysBase, &myFrame->mf_PPCArgs);
 
-                    struct MsgFrame* doneFrame = CreateMsgFrame(PowerPCBase);
+                    /* not cleared: the copy below overwrites all 192 bytes (G1 D) */
+                    struct MsgFrame* doneFrame = CreateMsgFrameNoClear(PowerPCBase);
 
                     CopyMemQuick((APTR)myFrame, (APTR)doneFrame, sizeof(struct MsgFrame));
 
@@ -1079,7 +1080,23 @@ LIBFUNC68K void myCausePPCInterrupt(__reg("a6") struct PrivatePPCBase* PowerPCBa
         }
         case DEVICE_MPC8314E:
         {
-            break; //Not implemented yet
+            /*
+             * E9: THE PCIe M1's CausePPCInterrupt. A count in PPC RAM (kf_Doorbell, a cache
+             * line of its own) goes up by one, and then PEX_IMBCR[READY] is set, the interrupt
+             * a posted frame raises (PEX_CSMISR[IMB], MPC8315E RM Rev. 2, PDF pages 755-756 and
+             * 767-768). The kernel's PCIe arm compares the count with the one it has acted on
+             * and runs the EXCF_INTERRUPT handlers when they differ. The mailbox data register
+             * is not used: a frame post overwrites it. A count, not a flag, so that no store of
+             * the PPC can wipe a doorbell. The write of the count comes before the write of
+             * READY, in the order of the posted writes. 17.13b has no PCIe M1 (powerpc.s:4411-4433
+             * handles the K1, the Harrier and the MPC107) and WarpOS's CausePPCInterrupt is Phase5's
+             * InvokeInterrupt (powerpc.s:1446-1458): NO COUNTERPART.
+             */
+            struct killFIFO* bellFIFO = (struct killFIFO*)((ULONG)(PowerPCBase->pp_PPCMemBase + FIFO_END));
+
+            bellFIFO->kf_Doorbell = bellFIFO->kf_Doorbell + 1;
+            writememL(PowerPCBase->pp_BridgeConfig, IMMR_PEX_IMBCR, swap32(PEX_IMBCR_READY));
+            break;
         }
         case DEVICE_MPC107:
         {

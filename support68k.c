@@ -1106,7 +1106,8 @@ FUNC68K void MirrorTask(void)
 
                 Run68KCode(SysBase, &myFrame->mf_PPCArgs);
 
-                struct MsgFrame* doneFrame = CreateMsgFrame(PowerPCBase);
+                /* not cleared: the copy below overwrites all 192 bytes (G1 D) */
+                struct MsgFrame* doneFrame = CreateMsgFrameNoClear(PowerPCBase);
 
                 CopyMemQuick((APTR)myFrame, (APTR)doneFrame, sizeof(struct MsgFrame));
 
@@ -1702,7 +1703,15 @@ FUNC68K ULONG ZenInt(__reg("a1") APTR data, __reg("a5") APTR code)
 *
 *********************************************************************************************/
 
-struct MsgFrame* CreateMsgFrame(struct PrivatePPCBase* PowerPCBase)
+/*
+ * G1 D: THE FRAME COMES BACK AS IT WAS LEFT, NOT CLEARED. CreateMsgFrame below clears all 192
+ * bytes with 48 writes over PCI, about 33 us a call on both cards (a 68k write to PPC RAM costs
+ * 0.69 us: tests/rtbreak, 12 Nov 2026). A reply frame is filled by a copy of the request that
+ * overwrites every byte, so the two reply sites, the ID_T68K handlers of functions68k.c and of
+ * MirrorTask, take this one. 17.13b clears no frame it creates (powerpc.s:2780-2818, read 12
+ * Nov): the clearing is this library's own and the other callers keep it.
+ */
+struct MsgFrame* CreateMsgFrameNoClear(struct PrivatePPCBase* PowerPCBase)
 {
     struct ExecBase* SysBase = PowerPCBase->pp_PowerPCBase.PPC_SysLib;
     struct killFIFO* myFIFO = (struct killFIFO*)((ULONG)(PowerPCBase->pp_PPCMemBase + FIFO_END));
@@ -1734,14 +1743,20 @@ struct MsgFrame* CreateMsgFrame(struct PrivatePPCBase* PowerPCBase)
             case DEVICE_MPC8343E:
             case DEVICE_MPC8314E:
             {
-                if (*((volatile ULONG*)&myFIFO->kf_MIIFH) == myFIFO->kf_MIIFT)
+                /*
+                 * G1 D: EACH RING POINTER IS READ ONCE (see GetMsgFrame): kf_MIIFT, the 68k's own,
+                 * was read three times a call. 17.13b reads it once (powerpc.s:2796-2804).
+                 */
+                ULONG tail = myFIFO->kf_MIIFT;
+
+                if (*((volatile ULONG*)&myFIFO->kf_MIIFH) == tail)
                 {
                     msgFrame = 0xFFFFFFFF;              //Q4: empty; the PPC writes kf_MIIFH
                 }
                 else
                 {
-                    msgFrame = *((ULONG*)(myFIFO->kf_MIIFT));
-                    myFIFO->kf_MIIFT = (myFIFO->kf_MIIFT + 4) & 0xffff3fff;
+                    msgFrame = *((ULONG*)tail);
+                    myFIFO->kf_MIIFT = (tail + 4) & 0xffff3fff;
                 }
                 break;
             }
@@ -1765,7 +1780,18 @@ struct MsgFrame* CreateMsgFrame(struct PrivatePPCBase* PowerPCBase)
     }
     Enable();
 
-//#if 0
+    return (struct MsgFrame*)msgFrame;
+}
+
+/*
+ * The same frame with every one of its 48 longwords cleared, for a caller that fills in a few
+ * fields and sends it, so that the receiver finds the rest zero, as it always did: RunPPC's, the
+ * cross frames, MasterControl's (each caller read 12 Nov).
+ */
+struct MsgFrame* CreateMsgFrame(struct PrivatePPCBase* PowerPCBase)
+{
+    ULONG msgFrame = (ULONG)CreateMsgFrameNoClear(PowerPCBase);
+
     if (msgFrame)
     {
         ULONG clearFrame = msgFrame;
@@ -1775,7 +1801,6 @@ struct MsgFrame* CreateMsgFrame(struct PrivatePPCBase* PowerPCBase)
             clearFrame += 4;
         }
     }
-//#endif
     return (struct MsgFrame*)msgFrame;
 }
 
@@ -1804,8 +1829,10 @@ void SendMsgFrame(struct PrivatePPCBase* PowerPCBase, struct MsgFrame* msgFrame)
         {
             struct killFIFO* myFIFO = (struct killFIFO*)((ULONG)(PowerPCBase->pp_PPCMemBase + FIFO_END));
 
-            *((ULONG*)(myFIFO->kf_MIIPH)) = (ULONG)msgFrame;
-            myFIFO->kf_MIIPH = (myFIFO->kf_MIIPH + 4) & 0xffff3fff;
+            ULONG head = myFIFO->kf_MIIPH;          //G1 D: once, the 68k's own pointer (17.13b: powerpc.s:2842-2849)
+
+            *((ULONG*)head) = (ULONG)msgFrame;
+            myFIFO->kf_MIIPH = (head + 4) & 0xffff3fff;
             if (PowerPCBase->pp_DeviceID == DEVICE_MPC8343E)
             {
                 writememL(PowerPCBase->pp_BridgeConfig, IMMR_IMR0, (ULONG)msgFrame);
@@ -1868,8 +1895,10 @@ void FreeMsgFrame(struct PrivatePPCBase* PowerPCBase, struct MsgFrame* msgFrame)
         {
             struct killFIFO* myFIFO = (struct killFIFO*)((ULONG)(PowerPCBase->pp_PPCMemBase + FIFO_END));
 
-            *((ULONG*)(myFIFO->kf_MIOFH)) = (ULONG)msgFrame;
-            myFIFO->kf_MIOFH = (myFIFO->kf_MIOFH + 4) & 0xffff3fff;
+            ULONG head = myFIFO->kf_MIOFH;          //G1 D: once, the 68k's own pointer (17.13b: powerpc.s:2897-2903)
+
+            *((ULONG*)head) = (ULONG)msgFrame;
+            myFIFO->kf_MIOFH = (head + 4) & 0xffff3fff;
             break;
         }
         case DEVICE_MPC107:
@@ -1931,14 +1960,24 @@ struct MsgFrame* GetMsgFrame(struct PrivatePPCBase* PowerPCBase)
             case DEVICE_MPC8343E:
             case DEVICE_MPC8314E:
             {
-                if (myFIFO->kf_MIOPT == myFIFO->kf_MIOPH)
+                /*
+                 * G1 D: EACH RING POINTER IS READ ONCE. A field of this structure is a read over
+                 * PCI, 0.98 us on the PCI M1 and 1.87 us on the PCIe M1 behind its adapter
+                 * (tests/rtbreak, 12 Nov 2026), and the compiler does not merge them: kf_MIOPT
+                 * was read three times a call. 17.13b reads it once (powerpc.s:2943-2957): this
+                 * MATCHES it now. kf_MIOPT is the 68k's own, so one read is exact; kf_MIOPH is
+                 * the PPC's and is read once, through a volatile access.
+                 */
+                ULONG tail = myFIFO->kf_MIOPT;
+
+                if (tail == *((volatile ULONG*)&myFIFO->kf_MIOPH))
                 {
                     break;
                 }
                 else
                 {
-                    msgFrame = *((ULONG*)(myFIFO->kf_MIOPT));
-                    myFIFO->kf_MIOPT = (myFIFO->kf_MIOPT + 4) & 0xffff3fff;
+                    msgFrame = *((ULONG*)tail);
+                    myFIFO->kf_MIOPT = (tail + 4) & 0xffff3fff;
                 }
                 break;
             }
