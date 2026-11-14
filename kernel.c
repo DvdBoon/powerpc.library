@@ -3322,6 +3322,19 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
             }
             case CACHE_L2WTON:
             {
+                /*
+                 * C12 (c), REVIEW-LIB.md: NOT ON A 745x. Its L2CR has no write-through bit: bits 12 to 14 are
+                 * reserved on the MPC7450 and the MPC7448 (MPC7450UM Rev. 5, Figures 2-16 and 2-17, p. 2-31, PDF
+                 * p. 151), so L2WTON and L2WTOFF leave L2CR as it is on PVR upper halves 0x8000 to 0x8004, the
+                 * range L2InvWait and S6 use. 17.13b's .L2WTENABLE and .L2WTDISABLE set and clear the bit on every
+                 * CPU (ppcfunctions.p:110-127): THIS DIVERGES. WarpOS: NO COUNTERPART.
+                 */
+                ULONG pvrHiWt = getPVR() >> 16;
+
+                if ((pvrHiWt >= 0x8000) && (pvrHiWt <= 0x8004))
+                {
+                    break;
+                }
                 value = getL2State();
                 if ((value & L2CR_L2E) && !(value & L2CR_L2WT))
                 {
@@ -3353,6 +3366,12 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
             }
             case CACHE_L2WTOFF:
             {
+                ULONG pvrHiWo = getPVR() >> 16;    //C12 (c): a 745x has no L2WT, see L2WTON above
+
+                if ((pvrHiWo >= 0x8000) && (pvrHiWo <= 0x8004))
+                {
+                    break;
+                }
                 value = getL2State();
                 value &= ~L2CR_L2WT;
                 setL2State(value);

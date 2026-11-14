@@ -363,7 +363,8 @@ Caches and floating point:
   17.13b: on a G3 the switch broke the kernel (a Sonnet card crashed).
 - SetCache(L2WTON) on an enabled L2 flushes it, switches it off, sets
   write-through, invalidates it and switches it on again (the manual forbids
-  setting the bit while the L2 runs).
+  setting the bit while the L2 runs). A 745x's L2 has no write-through bit:
+  there L2WTON and L2WTOFF leave it alone and GetInfo() reports it off.
 - Floating-point accesses a G3 or G4 hands to software: a negative
   displacement of a misaligned access is signed now (it went 64 KB too far),
   lfdu, stfdu, lfsux, lfdx, lfdux, stfsux, stfdx, stfdux, stfiwx and dcbz are
@@ -402,9 +403,11 @@ Start-up and cards:
   call it. The NICE table sits in the library's own memory, as in 17.13b.
   SetHardware(HW_BRANCHTRACEOFF) clears the branch trace bit and not the
   single-step bit.
-- MPC745x boards: the time base and decrementer are switched on (HID0 TBEN)
-  and the on-chip L2 is set up with its own sequence, whose invalidate is
-  waited for on L2I (not run on a 745x board).
+- MPC745x on Harrier and MPC107 boards: the time base and decrementer are
+  switched on (HID0 TBEN) and the on-chip L2 is set up with its own
+  sequence, whose invalidate is waited for on L2I; MPC107 boards wrote the
+  7410's L2 sequence for every CPU. On a 745x run only on a Gyrus X2, whose
+  start-up does not finish yet.
 - K1/M1 (PCI): a frame posted just as the PPC finished reading the queue waited
   for the next interrupt; the interrupt is acknowledged before the queue is
   read now (the PCIe M1 likewise, not run there).

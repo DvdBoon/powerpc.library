@@ -3048,7 +3048,15 @@ PPCFUNCTION VOID myGetInfo(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg
                 }
                 case GETINFO_L2WT:
                 {
-                    myTagItem->ti_Data = (PowerPCBase->pp_L2State & L2CR_L2WT) ? 1 : 0;
+                    /* C12 (c): 0 on a 745x, whose L2CR has no write-through bit (bits 12-14 reserved,
+                     * MPC7450UM p. 2-31); SetCache's L2WTON leaves it alone there (kernel.c). */
+                    ULONG pvrHiWt = PowerPCBase->pp_CPUInfo >> 16;
+
+                    myTagItem->ti_Data = 0;
+                    if (((pvrHiWt < 0x8000) || (pvrHiWt > 0x8004)) && (PowerPCBase->pp_L2State & L2CR_L2WT))
+                    {
+                        myTagItem->ti_Data = 1;
+                    }
                     break;
                 }
                 case GETINFO_L2SIZE:

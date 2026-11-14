@@ -732,7 +732,82 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
     }
     l2Scratch = PowerPCBase->pp_PPCMemSize - l2PtSize - L2_SCRATCH_GAP;
 
-    switch (PowerPCBase->pp_DeviceID)
+    /*
+     * S12 (REVIEW-LIB.md): THE MPC745x ON THE HARRIER AND ON THE MPC107. The arm below was S6's and sat in the
+     * Harrier case alone. The MPC107 case wrote the 7410's external-L2 sequence for any CPU (the size probe, the
+     * L2RAM, clock and size fields, a poll of L2IP) and left HID0[TBEN] clear, so an MPC107 card with a 744x or
+     * 745x -- Motorola's Gyrus X2 (MPMC744x), the user's card of 14 Nov 2026 -- would have started with the time
+     * base and the decrementer stopped and its L2CR written in another part's layout. Both bridges now take the
+     * arm ahead of the device switch, with the HID0 bits both cases set; the K1 and the M1s never reach it (their
+     * device IDs). For a PVR upper half of 0x8000, 17.13b sets TBEN after its Caches routine on every card
+     * (setupppc.p:583-592) and takes the 0x8000 branch of Caches (:1106-1112): the TBEN MATCHES, the rest DIVERGES
+     * as S6 records below; for 0x8001 to 0x8004: NO COUNTERPART. The speed for 0x8000 is 17.13b's table, whose
+     * figures are for a 100 MHz bus on any card, as in 17.13b; 0x8001 to 0x8004 report 0 (GetInfo's answer only:
+     * pp_CPUSpeed has no other reader).
+     *
+     * S6 (REVIEW-LIB.md): THE MPC745x, PVR UPPER HALF 0x8000 TO 0x8004 (the range GetInfo takes for the 745x
+     * and 744x). It used to fall into the external-L2 branch, which writes the 7410's layout into a register that
+     * has another one (L2CR, MPC7450UM Table 2-12: bits 2-3 must be 0b00, 4-9 are reserved, no clock, size or
+     * test-support field), and polls L2IP, bit 31, which the part does not define, so the L2 could be enabled
+     * before its invalidate was done; it also left HID0[TBEN] clear: HID0 resets to 0x80000000 (Table 2-45), and
+     * the time base and the decrementer run only with TBEN set (Table 2-7). Now: TBEN is set with an isync after
+     * the mtspr (setHID0 ends in one; Table 2-7 note 1); the on-chip L2 is invalidated and enabled as 3.6.3.1.1
+     * (PDF p. 295) has it, polling L2I, bit 10, which the chip clears when the invalidate is done; its size is the
+     * part's (256 KB for 0x8000 and 0x8001, 512 KB for 0x8002 and 0x8003, 1 MB for 0x8004: PDF pp. 60, 78 and
+     * 245); and the speed comes from 17.13b's table for 0x8000 with HID1 bits 15-19 (setupppc.p:1212-1224), and
+     * stays 0 for 0x8001 to 0x8004, whose tables are in the hardware specifications. 17.13b sets TBEN for 0x8000
+     * only, without the isync (setupppc.p:585-592), and programs the 750FX's L2 sequence for it (:1106-1137):
+     * THIS DIVERGES in the PVR range, the isync and the poll. WarpOS: NO COUNTERPART (a search of warpos/ for
+     * TBEN and l2cr returns no line). Checked against the object and the manual; on a 745x it has run only on
+     * the Gyrus X2 (an MPC107 card with an MPC7441), in the debug builds of 14 Nov 2026.
+     */
+    if (((PowerPCBase->pp_DeviceID == DEVICE_HARRIER) || (PowerPCBase->pp_DeviceID == DEVICE_MPC107)) &&
+        (pvrHi >= 0x8000) && (pvrHi <= 0x8004))
+    {
+        value0 |= HID0_ICE | HID0_DCE | HID0_SGE | HID0_BTIC | HID0_BHTE;
+        setHID0(value0);
+
+        if (pvrHi == 0x8004)
+        {
+            l2Size = L2_SIZE_1M;
+        }
+        else if (pvrHi >= 0x8002)
+        {
+            l2Size = L2_SIZE_HM;
+        }
+        else
+        {
+            l2Size = L2_SIZE_QM;
+        }
+
+        value0 |= HID0_TBEN;
+        setHID0(value0);
+
+        if (!(getL2CR() & L2CR_L2E))
+        {
+            setL2CR(L2CR_L2I);
+            while (getL2CR() & L2CR_L2I);
+            setL2CR(L2CR_L2E);
+        }
+
+        if (pvrHi == 0x8000)
+        {
+            pll = (value1 >> 12) & 0x1f;
+
+            ULONG* pllTable = getTableVGer();
+
+            while (pllTable[num])
+            {
+                if (pllTable[num] == pll)
+                {
+                    PowerPCBase->pp_CPUSpeed = pllTable[num+1];
+                    break;
+                }
+                num +=2;
+            }
+        }
+    }
+    else switch (PowerPCBase->pp_DeviceID)
     {
         case DEVICE_HARRIER:
         {
@@ -762,68 +837,6 @@ PPCSETUP void setupCaches(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg(
                         break;
                     }
                     num +=2;
-                }
-            }
-            else if ((pvrHi >= 0x8000) && (pvrHi <= 0x8004))
-            {
-                /*
-                 * S6 (REVIEW-LIB.md): THE MPC745x, PVR UPPER HALF 0x8000 TO 0x8004 (the range GetInfo
-                 * takes for the 745x and 744x). It used to fall into the branch below, which writes the
-                 * 7410's layout into a register that has another one (L2CR, MPC7450UM Table 2-12: bits
-                 * 2-3 must be 0b00, 4-9 are reserved, no clock, size or test-support field), and polls
-                 * L2IP, bit 31, which the part does not define, so the L2 could be enabled before its
-                 * invalidate was done; it also left HID0[TBEN] clear: HID0 resets to 0x80000000 (Table
-                 * 2-45), and the time base and the decrementer run only with TBEN set (Table 2-7).
-                 * Now: TBEN is set with an isync after the mtspr (setHID0 ends in one; Table 2-7 note 1);
-                 * the on-chip L2 is invalidated and enabled as 3.6.3.1.1 (PDF p. 295) has it, polling
-                 * L2I, bit 10, which the chip clears when the invalidate is done; its size is the part's
-                 * (256 KB for 0x8000 and 0x8001, 512 KB for 0x8002 and 0x8003, 1 MB for 0x8004: PDF
-                 * pp. 60, 78 and 245); and the speed comes from 17.13b's table for 0x8000 with HID1 bits
-                 * 15-19 (setupppc.p:1212-1224), and stays 0 for 0x8001 to 0x8004, whose tables are in
-                 * the hardware specifications. 17.13b sets TBEN for 0x8000 only, without the isync
-                 * (setupppc.p:585-592), and programs the 750FX's L2 sequence for it (:1106-1137): THIS
-                 * DIVERGES in the PVR range, the isync and the poll. WarpOS: NO COUNTERPART (a search
-                 * of warpos/ for TBEN and l2cr returns no line). Checked against the object and the
-                 * manual; no 745x card has run it.
-                 */
-                if (pvrHi == 0x8004)
-                {
-                    l2Size = L2_SIZE_1M;
-                }
-                else if (pvrHi >= 0x8002)
-                {
-                    l2Size = L2_SIZE_HM;
-                }
-                else
-                {
-                    l2Size = L2_SIZE_QM;
-                }
-
-                value0 |= HID0_TBEN;
-                setHID0(value0);
-
-                if (!(getL2CR() & L2CR_L2E))
-                {
-                    setL2CR(L2CR_L2I);
-                    while (getL2CR() & L2CR_L2I);
-                    setL2CR(L2CR_L2E);
-                }
-
-                if (pvrHi == 0x8000)
-                {
-                    pll = (value1 >> 12) & 0x1f;
-
-                    ULONG* pllTable = getTableVGer();
-
-                    while (pllTable[num])
-                    {
-                        if (pllTable[num] == pll)
-                        {
-                            PowerPCBase->pp_CPUSpeed = pllTable[num+1];
-                            break;
-                        }
-                        num +=2;
-                    }
                 }
             }
             else
