@@ -55,6 +55,15 @@ APTR OldLoadSeg, OldNewLoadSeg, OldAllocMem, OldAddTask, OldRemTask;
 struct PPCBase* myPPCBase;
 struct ExecBase* mySysBase;
 
+/*
+ * L8: THE TWO INTERRUPT NODES ARE STATIC, as 17.13b's MyInterrupt and
+ * ZenInterrupt (powerpc.s:4559, :4563): there is no allocation to fail at
+ * start-up, where an unchecked AllocVec result was stored through. Zero at
+ * load (BSS); LibInit fills them in.
+ */
+static struct Interrupt gortNode;
+static struct Interrupt zenNode;
+
 #ifdef DEBUG
 /*
  * THE DEBUG BUILD (build.ps1 -DebugInit, 6 Nov 2026): the PCIe board's IMMR
@@ -1271,7 +1280,7 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
 
     D(("Copied PPC kernel code into place\n"));
 
-    struct Interrupt* myInt = AllocVec(sizeof(struct Interrupt), MEMF_PUBLIC | MEMF_CLEAR);
+    struct Interrupt* myInt = &gortNode;       /* L8, static */
     myInt->is_Code = (APTR)&GortInt;
     myInt->is_Data = NULL;
     myInt->is_Node.ln_Pri = 110;
@@ -1417,7 +1426,7 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
         case DEVICE_MPC8343E:
         case DEVICE_MPC8314E:
         {
-            struct Interrupt* myInt2 = AllocVec(sizeof(struct Interrupt), MEMF_PUBLIC | MEMF_CLEAR);
+            struct Interrupt* myInt2 = &zenNode;   /* L8, static */
             myInt2->is_Code = (APTR)&ZenInt;
             myInt2->is_Data = NULL;
             myInt2->is_Node.ln_Pri = -50;

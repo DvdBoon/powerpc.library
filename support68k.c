@@ -40,6 +40,18 @@ extern struct ExecBase* mySysBase;
 extern struct PPCBase* myPPCBase;
 
 APTR  RemSysTask;
+
+/*
+ * Q10: SET WHILE GortInt SERVES THE MESSAGE QUEUE. ZenInt, the vertical-blank
+ * server of the K1 and the M1s, runs at level 3 and can interrupt GortInt, an
+ * INT2 server at level 2; a second GortInt inside the first would serve the
+ * frames behind the one in hand first. ZenInt leaves the queue alone while
+ * this is set, and a GortInt entered while it is set returns at once. A 68k
+ * variable, so that testing it costs GortInt no read across the bus: the
+ * library's base is in the card's memory. Zero at load (BSS).
+ */
+static volatile ULONG gortBusy;
+
 UBYTE powerlib[] = "powerpc.library\0";
 UBYTE ppclib[] = "ppc.library\0";
 UBYTE ampname[]  = "AmigaAMP\0";
@@ -1497,6 +1509,16 @@ FUNC68K ULONG GortInt(__reg("a1") APTR data, __reg("a5") APTR code)
 	struct MsgFrame* myFrame;
 	ULONG flag = 0;
 
+    /*
+     * Q10: ONE GortInt AT A TIME (gortBusy, above). Set before the first
+     * frame is taken and cleared after the last, at the one exit below.
+     */
+    if (gortBusy)
+    {
+        return 0;
+    }
+    gortBusy = 1;
+
     switch (PowerPCBase->pp_DeviceID)
 	{
 		case DEVICE_HARRIER:
@@ -1676,6 +1698,7 @@ FUNC68K ULONG GortInt(__reg("a1") APTR data, __reg("a5") APTR code)
      * the Radeon driver answers 0 for the same reason (its Interrupt.c:105-122).
      * flag still decides above whether the queue is drained. tests/int2scan.
      */
+    gortBusy = 0;
     return 0;
 }
 
@@ -1691,9 +1714,37 @@ FUNC68K ULONG ZenInt(__reg("a1") APTR data, __reg("a5") APTR code)
     struct PrivatePPCBase* PowerPCBase = (struct PrivatePPCBase*)myPPCBase;
     struct Custom* custom = (struct Custom*)CUSTOMBASE;
 
-	ULONG configBase = PowerPCBase->pp_BridgeConfig;
+	ULONG configBase;
+	ULONG pending;
 
-	if ((!(readmemL(PowerPCBase->pp_BridgeConfig, IMMR_OMISR) & IMMR_OMISR_OM0I))) //&& (!(readmemL(PowerPCBase->pp_BridgeConfig, IMMR_PEX_OMBCR))))
+    /* Q10: this blank interrupted GortInt, which drains the queue itself */
+    if (gortBusy)
+    {
+        return 0;
+    }
+
+    /*
+     * Q11 A: IS THE CARD'S MESSAGE INTERRUPT PENDING? The K1 and the PCI M1
+     * post through OMR0, which sets OMISR[OM0I]. The PCIe M1 posts by setting
+     * PEX_OMBCR[READY], which sets PEX_HISR[OMB] (MPC8315E RM, PDF p. 758)
+     * and leaves OMISR clear, so the OMISR test found nothing pending at every
+     * blank there and this server took any waiting message. A pending
+     * interrupt is GortInt's; a waiting message is picked up here only when
+     * none is pending, on all three cards. 17.15 had a PCIe test commented
+     * out here, on PEX_OMBCR, whose READY stays set after a lost interrupt.
+     * PEX_HISR_OMB is the 68k's view, as GortInt writes it.
+     */
+	configBase = PowerPCBase->pp_BridgeConfig;
+	if (PowerPCBase->pp_DeviceID == DEVICE_MPC8314E)
+	{
+		pending = readmemL(configBase, IMMR_PEX_HISR) & PEX_HISR_OMB;
+	}
+	else
+	{
+		pending = readmemL(configBase, IMMR_OMISR) & IMMR_OMISR_OM0I;
+	}
+
+	if (!pending)
 	{
 		struct killFIFO* myFIFO = (struct killFIFO*)((ULONG)(PowerPCBase->pp_PPCMemBase + FIFO_END));
 		if (myFIFO->kf_MIOPT != myFIFO->kf_MIOPH)

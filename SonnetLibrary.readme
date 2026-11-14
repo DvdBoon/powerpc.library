@@ -303,6 +303,9 @@ RunPPC(), Run68K() and the 68k side:
   Guru) or build a second PPC task for its caller.
 - The 68k's message interrupt lets the other INT2 servers after it run (a
   Radeon's vertical blank, SCSI); it claimed every message interrupt as its own.
+- K1/M1: the vertical-blank pick-up of waiting messages waits while the
+  message interrupt runs (it could serve later messages first); on the PCIe M1
+  it tests that card's own interrupt flag (it tested the K1's).
 
 Messages, pools and memory calls:
 - A long run of PPC writes to Amiga memory, or debug output, could reuse a
@@ -412,6 +415,8 @@ Start-up and cards:
 - PCIe M1: GetCPU() answers CPUF_603E, as GetInfo() does (it answered 0).
 - MPC745x boards: GetCPU() answers CPUF_G4 for a 7445/7455, 7447/7457, 7447A
   or 7448, as GetInfo() does (it answered 0; not run on a 745x board).
+- The message and vertical-blank interrupt structures are part of the library,
+  as in 17.13b; a failed allocation at start-up wrote over the 68k's vectors.
 - MPC107: the wait for the PPC's first exception at start-up is bounded (a PPC
   that stopped hung ramlib for good) and ends with "PowerPC CPU stopped after
   setup"; the memory controller waits, as in 17.13b, between enabling the
