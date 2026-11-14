@@ -292,6 +292,8 @@ RunPPC(), Run68K() and the 68k side:
   task switching forbidden, as WarpOS does (17.13b searches without a lock): a
   task switched out in the search could follow freed memory (a bus error or a
   Guru) or build a second PPC task for its caller.
+- The 68k's message interrupt lets the other INT2 servers after it run (a
+  Radeon's vertical blank, SCSI); it claimed every message interrupt as its own.
 
 Messages, pools and memory calls:
 - A long run of PPC writes to Amiga memory, or debug output, could reuse a
@@ -397,6 +399,7 @@ Start-up and cards:
   strap; the reset word was read byte-reversed and the wrong bit tested.
 - PCIe M1: the bus clock and the task slice follow its DDRCM strap too (they
   were halved whatever the strap).
+- PCIe M1: GetCPU() answers CPUF_603E, as GetInfo() does (it answered 0).
 - MPC107: the wait for the PPC's first exception at start-up is bounded (a PPC
   that stopped hung ramlib for good) and ends with "PowerPC CPU stopped after
   setup" (not run on an MPC107 board).

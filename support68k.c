@@ -1666,7 +1666,17 @@ FUNC68K ULONG GortInt(__reg("a1") APTR data, __reg("a5") APTR code)
 			}
 		}
     }
-	return flag; //Should be flag or 0
+    /*
+     * Q12: ALWAYS "NOT MINE", SO EXEC GOES ON DOWN THE INT2 CHAIN. GortInt
+     * shares INT2 with the other cards' servers (the Radeon's vertical blank,
+     * SCSI). A non-zero return ends exec's walk of the chain, so a server
+     * behind GortInt was not called for an interrupt of its own that came
+     * with the card's. Each server tests its own source, so going on costs a
+     * few instructions. 17.13b's SonInt answers "handled" (powerpc.s:2351-2354);
+     * the Radeon driver answers 0 for the same reason (its Interrupt.c:105-122).
+     * flag still decides above whether the queue is drained. tests/int2scan.
+     */
+    return 0;
 }
 
 /********************************************************************************************

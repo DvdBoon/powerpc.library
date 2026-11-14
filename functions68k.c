@@ -705,7 +705,14 @@ LIBFUNC68K ULONG myGetCPU(__reg("a6") struct PrivatePPCBase* PowerPCBase)
         {
             return (CPUF_G4);
         }
-        case 0x8083:
+        /*
+         * C9: BOTH e300 CORES ARE A 603e, as GetInfo(GETINFO_CPU) answers
+         * for both cards from the device ID (functionsppc.c). 17.13b knew
+         * the MPC8343E's alone (powerpc.s:2754); the MPC8314E of the PCIe M1
+         * came later and got 0 here. tests/getcpu.
+         */
+        case ID_MPC834X:                /* the MPC8343E's e300c1: K1, PCI M1 */
+        case ID_MPC831X:                /* the MPC8314E's e300c3: PCIe M1 */
         {
             return (CPUF_603E);
         }
