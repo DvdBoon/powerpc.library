@@ -701,7 +701,17 @@ LIBFUNC68K ULONG myGetCPU(__reg("a6") struct PrivatePPCBase* PowerPCBase)
         {
             return (CPUF_G3);
         }
+        /*
+         * C13 (REVIEW-LIB.md): THE OTHER 745x/744x TOO, as GetInfo(GETINFO_CPU) (functionsppc.c) and
+         * PVR_IS_G4 (constants.h) take them: 0x8001 (7445/7455), 0x8002 (7447/7457), 0x8003 (7447A)
+         * and 0x8004 (7448) were answered 0 here. 17.13b's GetCPU knows 0x8000 alone
+         * (powerpc.s:2741-2771): THIS DIVERGES, toward the library's own GetInfo. tests/getcpu.
+         */
         case 0x8000:
+        case 0x8001:
+        case 0x8002:
+        case 0x8003:
+        case 0x8004:
         {
             return (CPUF_G4);
         }

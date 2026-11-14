@@ -997,7 +997,21 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
         {
             writePCI(MPC107_MCCR4, 0x00100000);
             writePCI(MPC107_MCCR3, 0x0002a29c);
-            writePCI(MPC107_MCCR2, 0xe0001040); //EDO?
+
+            /*
+             * S11 (REVIEW-LIB.md): ENV:sonnet/EnEDOMem SETS MCCR2'S EDO ENABLE, bit 16 (0x00010000), in this
+             * DRAM set, as 17.13b's ConfigMem does when option_EnEDOMem is set (setupppc.p:1846-1855): THIS
+             * MATCHES. The option is the top byte of id_Environment1 (libinit.c:1741, :3046); MCCR2 was
+             * 0xE0001040 whatever it said. A card with fast-page-mode DIMMs, as the Sonnet PCI 7200's manual
+             * names them, leaves the option unset.
+             */
+            ULONG mccr2 = 0xe0001040;
+
+            if (initData->id_Environment1 >> 24)
+            {
+                mccr2 |= 0x00010000;
+            }
+            writePCI(MPC107_MCCR2, mccr2);
             writePCI(MPC107_MCCR1, 0xffe20000);
 
 

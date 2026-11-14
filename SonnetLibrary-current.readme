@@ -78,6 +78,8 @@ The library reads its options from ENV:sonnet when it starts; save them in
 ENVARC:sonnet to keep them. Each value is a single digit. Currently supported
 are:
 
+- EnEDOMem (0 or 1): Enable if you have EDO RAM installed (cards with an
+  MPC107). Default = 0.
 - Debug (0-3): Set the level of debug messages. 0 = no messages (default).
 - EnMemExc (0 or 1): With 1, Alignment and Data Access (DSI) exceptions go
   to the registered exception handlers first, as on WarpOS; an alignment
@@ -175,6 +177,8 @@ ENV options (see above):
 - Added ReportG4asG3. EnMemExc replaces EnAlignExc and EnDAccessExc.
   SetCMemDiv was read but did nothing; it works now, and the divider is set
   before the L2 cache is switched on (it was changed while the cache ran).
+- EnEDOMem works again on cards with an MPC107: it sets the memory
+  controller's EDO bit, as in 17.13b (it was read and ignored).
 
 Scheduler and tasks:
 - Task priorities work now: the WarpOS priority scheduler (NEWPRIRULE) with
@@ -401,6 +405,8 @@ Start-up and cards:
 - PCIe M1: the bus clock and the task slice follow its DDRCM strap too (they
   were halved whatever the strap).
 - PCIe M1: GetCPU() answers CPUF_603E, as GetInfo() does (it answered 0).
+- MPC745x boards: GetCPU() answers CPUF_G4 for a 7445/7455, 7447/7457, 7447A
+  or 7448, as GetInfo() does (it answered 0; not run on a 745x board).
 - MPC107: the wait for the PPC's first exception at start-up is bounded (a PPC
   that stopped hung ramlib for good) and ends with "PowerPC CPU stopped after
   setup"; the memory controller waits, as in 17.13b, between enabling the
