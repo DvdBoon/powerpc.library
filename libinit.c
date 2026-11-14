@@ -924,6 +924,11 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
 #ifdef DEBUG
         D(("Timed out after %ld reads, t=%ld: last status %08lx, %ld changes\n", i, dbgTicks(myConsts), status, dbgChanges));
 
+        /* setupPPC's stage in this build (setupppc.c DBGMARK, 0x5043000n), in page zero of the card's RAM */
+        ULONG dbgZpFirst = ((volatile struct PPCZeroPage*)cardData->id_MemBase)->zp_Status;
+
+        D(("zp_Status at the time-out: %08lx (card RAM at %08lx)\n", dbgZpFirst, (ULONG)cardData->id_MemBase));
+
         if (deviceID == DEVICE_MPC8314E)
         {
             /*
@@ -1304,8 +1309,35 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
     myProc->pr_Task.tc_UserData = (APTR)myConsts;
     Signal((struct Task*)myProc, SIGBREAKF_CTRL_F);
 
+#ifdef DEBUG
+    /*
+     * THE DEBUG BUILD: the zero-page status during the wait for STATUS_READY.
+     * setupPPC writes its stage there in this build (setupppc.c DBGMARK,
+     * 0x5043000n), so the last value read is the stage the PPC reached. The
+     * extra read in the loop makes the debug build's time-out longer.
+     */
+    ULONG dbgZpLast    = myZeroPage->zp_Status;
+    ULONG dbgZpChanges = 0;
+
+    D(("Waiting for STATUS_READY: zp_Status %08lx, zp_DECCounter %08lx, t=%ld\n",
+       dbgZpLast, myZeroPage->zp_DECCounter, dbgTicks(myConsts)));
+#endif
+
     for (i=0; i<0xEC0000; i++)
     {
+#ifdef DEBUG
+        ULONG dbgZpNow = myZeroPage->zp_Status;
+
+        if (dbgZpNow != dbgZpLast)
+        {
+            if (dbgZpChanges < 16)
+            {
+                D(("zp_Status %08lx after %ld reads, t=%ld\n", dbgZpNow, i, dbgTicks(myConsts)));
+            }
+            dbgZpChanges++;
+            dbgZpLast = dbgZpNow;
+        }
+#endif
         if (myZeroPage->zp_Status == STATUS_READY)
         {
             break;
@@ -1313,9 +1345,19 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
     }
     if (i == 0xEC0000)
     {
+#ifdef DEBUG
+        ULONG dbgZpEnd  = myZeroPage->zp_Status;
+        ULONG dbgDecEnd = myZeroPage->zp_DECCounter;
+
+        D(("Timed out waiting for STATUS_READY after %ld reads, t=%ld: zp_Status %08lx, zp_DECCounter %08lx, %ld changes\n",
+           i, dbgTicks(myConsts), dbgZpEnd, dbgDecEnd, dbgZpChanges));
+#endif
         PrintCrtErr(myConsts, "PowerPC CPU possibly crashed during setup");
         return NULL;
     }
+#ifdef DEBUG
+    D(("STATUS_READY after %ld reads, t=%ld\n", i, dbgTicks(myConsts)));
+#endif
 
     /*
      * L6: THE MPC107's WAIT FOR THE PPC'S FIRST EXCEPTION IS BOUNDED, as the wait

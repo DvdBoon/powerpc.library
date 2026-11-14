@@ -3012,12 +3012,20 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
                  * at :269-270) and WarpOS's DCacheOff_S stores nothing there (hal/warp.p:588-597): THIS
                  * MATCHES both on the order.
                  */
-                if ((PowerPCBase->pp_DeviceID != DEVICE_MPC8343E) && (PowerPCBase->pp_DeviceID != DEVICE_MPC8314E))
+                /*
+                 * C14 (REVIEW-LIB.md): C10 ONLY ON A 7400 OR A 7410, the CPUs whose manual the rule comes from.
+                 * On the Sonnet PCI 7200's G3 (PVR 0x00088302) the L2 switched off here and on again in DCACHEON
+                 * gave back a line of this library base where KSetCache's own code is read (tests/dealign
+                 * watch, 14 Nov 2026), and the kernel took an illegal instruction. Every other CPU keeps its
+                 * L2 as it is, as 17.13b's .DCACHEOFF and .DCACHEON do (ppcfunctions.p:250-274, :307-321):
+                 * THIS MATCHES 17.13b there; on the 7400/7410 it DIVERGES as C10 does. The e300 cards fail the
+                 * PVR test before L2CR, which they do not have, is read.
+                 */
+                ULONG pvrHi = getPVR() >> 16;
+
+                if (((pvrHi == 0x000C) || (pvrHi == 0x800C)) && (getL2State() & L2CR_L2E))
                 {
-                    if (getL2State() & L2CR_L2E)
-                    {
-                        PowerPCBase->pp_L2OffByD = 1;
-                    }
+                    PowerPCBase->pp_L2OffByD = 1;
                 }
 
                 FlushDCache(PowerPCBase, 1);
@@ -3072,7 +3080,7 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
              * still off: L2I with L2E clear, a wait for the invalidate (L2InvWait: L2IP, or L2I on a
              * 745x, C12), then L2E, as L2CACHEON does. An explicit L2CACHEOFF since the switch-off
              * cleared the flag, and an L2 that a program switched on itself in the meantime is left as
-             * it is.
+             * it is. C14: the flag is set only on a 7400/7410 (DCACHEOFF and L2CACHEON).
              */
             if (PowerPCBase->pp_L2OffByD)
             {
@@ -3278,8 +3286,15 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
                  * doing (ppcfunctions.p:138-151): THIS DIVERGES, toward the manual. WarpOS: NO COUNTERPART
                  * (a search of warpos/ for l2cr, l2wt, mfl2, mtl2 and L2E, 12 Nov, returns 0 lines). A
                  * card without an L2 (pp_L2Size 0) keeps the old behavior.
+                 *
+                 * C14: THIS TOO ONLY ON A 7400 OR A 7410. C12 comes from the same manual as C10, and the L2 it
+                 * leaves to DCACHEON would come back through C10's switch-on, which broke the kernel on the
+                 * Sonnet's G3. Elsewhere L2CACHEON sets L2E whatever the data cache is doing, as 17.13b's
+                 * .L2ENABLE: THIS MATCHES 17.13b there.
                  */
-                if ((PowerPCBase->pp_CacheDState) && (PowerPCBase->pp_L2Size))
+                ULONG pvrHiOn = getPVR() >> 16;
+
+                if ((PowerPCBase->pp_CacheDState) && (PowerPCBase->pp_L2Size) && ((pvrHiOn == 0x000C) || (pvrHiOn == 0x800C)))
                 {
                     PowerPCBase->pp_L2OffByD = 1;
                     break;

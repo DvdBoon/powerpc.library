@@ -351,10 +351,11 @@ Caches and floating point:
 - GetInfo() reads the cache state, the page table and the L2 from the CPU at
   the call (after a SetCache() it showed the old state), and its L2 tags answer
   on/off as 1 or 0, the write-through state and the size in use, as in 17.13b.
-- SetCache(DCACHEOFF) switches an enabled L2 off together with the data cache
-  and DCACHEON switches it on again (the manual wants the L2 off whenever the
-  data cache is off); an L2CACHEON made while the data cache is off waits for
-  DCACHEON.
+- SetCache(DCACHEOFF) on a 7400 or 7410 switches an enabled L2 off together
+  with the data cache and DCACHEON switches it on again (their manual wants the
+  L2 off whenever the data cache is off); an L2CACHEON made while the data
+  cache is off waits for DCACHEON. Other CPUs keep the L2 as it is, as in
+  17.13b: on a G3 the switch broke the kernel (a Sonnet card crashed).
 - SetCache(L2WTON) on an enabled L2 flushes it, switches it off, sets
   write-through, invalidates it and switches it on again (the manual forbids
   setting the bit while the L2 runs).
@@ -409,7 +410,9 @@ Start-up and cards:
 - PCIe M1: GetCPU() answers CPUF_603E, as GetInfo() does (it answered 0).
 - MPC107: the wait for the PPC's first exception at start-up is bounded (a PPC
   that stopped hung ramlib for good) and ends with "PowerPC CPU stopped after
-  setup" (not run on an MPC107 board).
+  setup"; the memory controller waits, as in 17.13b, between enabling the
+  memory banks and its final setting. A Sonnet PCI 7200 (G3, 192 MB) runs the
+  library's whole test set.
 
 Program loader and process exit:
 - With SetCPUComm set, hunks that asked for FAST or CHIP memory are loaded

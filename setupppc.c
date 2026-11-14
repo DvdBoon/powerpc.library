@@ -1043,6 +1043,22 @@ PPCSETUP void setupPPC(__reg("r3") struct InitData* initData)
 
         sync();
 
+        /*
+         * L10: THE PAUSE BETWEEN THE BANK ENABLE AND THE FINAL MCCR1, as 17.13b
+         * has it (setupppc.p:1924-1928, .MPC107Wait200us: 0x10000 turns of bdnz,
+         * about 200 us by its name). The Sonnet PCI 7200 (MPC107 revision 0x12,
+         * the FPM/EDO timings above) does not start with the library without it
+         * (the user, 14 Nov 2026). The Tsi107 manual: FPM or EDO DRAM is
+         * available after eight refreshes once MEMGO is set (section 6.3.4,
+         * PDF p. 275). The same loop form as the settle below, which vbcc keeps.
+         */
+        ULONG wait200 = 0x10000;
+
+        while (wait200)
+        {
+            wait200--;
+        }
+
         writePCI(MPC107_MCCR1, ms.ms_mccr1);
 
         ULONG settle = 0x2ffff;
