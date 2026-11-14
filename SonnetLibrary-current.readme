@@ -398,11 +398,10 @@ Start-up and cards:
   call it. The NICE table sits in the library's own memory, as in 17.13b.
   SetHardware(HW_BRANCHTRACEOFF) clears the branch trace bit and not the
   single-step bit.
-- MPC745x on Harrier and MPC107 boards: the time base and decrementer are
-  switched on (HID0 TBEN) and the on-chip L2 is set up with its own
-  sequence, whose invalidate is waited for on L2I; MPC107 boards wrote the
-  7410's L2 sequence for every CPU. On a 745x run only on a Gyrus X2, whose
-  start-up does not finish yet.
+- MPC107 boards with an MPC745x (Gyrus X2): the time base and decrementer
+  are switched on (HID0 TBEN) and the on-chip L2 is set up with its own
+  sequence, whose invalidate is waited for on L2I (the 7410's sequence was
+  used for every CPU). The Gyrus X2 does not finish its start-up yet.
 - K1/M1 (PCI): a frame posted just as the PPC finished reading the queue waited
   for the next interrupt; the interrupt is acknowledged before the queue is
   read now (the PCIe M1 likewise, not run there).
