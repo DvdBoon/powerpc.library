@@ -1484,10 +1484,6 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
     D(("Opened ppc.library emulator for PowerUP support\n"));
     }
 
-    if ((myConsts->ic_pciType == VENDOR_E3B) && ((myBase->pp_DeviceID == DEVICE_MPC8343E) || (myBase->pp_DeviceID == DEVICE_MPC8314E)) && (myConsts->ic_gfxType == VENDOR_3DFX))
-    {
-            PrintError(SysBase, "e300 based PPC cards currently not working correctly!");   //W7: a warning, so no CleanUp: the library goes on using pci, dos and expansion
-    }
     D(("Done!\n"));
     return PowerPCBase;
 }
