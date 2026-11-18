@@ -31,8 +31,8 @@ What is needed:
 - Bigfoot Killer NIC M1 PCI card with 400MHz MPC8343E and 64MB on-board RAM
 - Bigfoot Killer NIC K1 PCI card with 333MHz MPC8343E and 64MB on-board RAM
 - Bigfoot/Xeno Killer NIC 2100 PCIe card with 400MHz MPC8314E and 128MB
-  on-board RAM. This only works partially for Xilinx based Prometheus cards.
-  Full support will need a further FirmWare fix.
+  on-board RAM. This only works for Altera based Prometheus cards with
+  latest firmware fix. Xilinx based cards are not working.
 - pci.library version 13.8 or higher from Elbox (does not support PCIe cards).
 - prometheus.library version 4.5 or higher (17.14+).
 - AHI for sound. AHI 4.18 recommended.
@@ -158,15 +158,10 @@ VGA memory.
 
 The future:
 
-I consider the library as finished. Bug fixes will happen and maybe add PCIe
-card support. Currently it does not work fully on the Prometheus, but maybe it
-will on the Mediator MKIV in combination with pci.library 14.0. I do not see a
-reason to add memory protection as nothing out there uses it.
+I consider the library as finished. Bug fixes will happen and only things
+left are OpenPCI support and WarpOS memory protection emulation.
 
-I looked at an implementation of Nallepuh for Payback, but someone else can
-do that :-)
-
-It was a fun 9 year ride and thanks for your support! :-)
+It was a fun 11 year ride and thanks for your support! :-)
 
 
 -+-+-+-+-+-+-+-+-+-+-+-+-+
