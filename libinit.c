@@ -179,6 +179,15 @@ int main (void)
 *
 *********************************************************************************************/
 
+/*
+ * ONE VERSION STRING (17.17, 18 Nov 2026, the user: "fix the double version string in the
+ * library too. go"). VSTRING was written out here and again for lib_IdString in LibInit, so the
+ * binary held "$VER: powerpc.library ..." twice (17.16 f6dbff87 too). Both now point at this one
+ * copy, as 17.13b's ROM tag (powerpc.s:96) and its init table (powerpc.s:4582) both point at
+ * PowerIDString (powerpc.s:4819): MATCHES 17.13b.
+ */
+static const char vString[] = VSTRING;
+
 static const struct Resident RomTag =
 {
     RTC_MATCHWORD,
@@ -189,7 +198,7 @@ static const struct Resident RomTag =
     NT_LIBRARY,
     LIB_PRIORITY,
     LIBNAME,
-    VSTRING,
+    (char *)vString,
     (APTR)&LibInit
 };
 
@@ -382,7 +391,7 @@ struct PPCBase *mymakeLibrary(struct InternalConsts *myConsts, ULONG funPointer)
     InitStruct(&LibInitData[0], PowerPCBase, 0);
 
     PowerPCBase->PPC_LibNode.lib_Node.ln_Name = LIBNAME;        //Initializer of ln_Name does not seem to work with vbcc
-    PowerPCBase->PPC_LibNode.lib_IdString = VSTRING;
+    PowerPCBase->PPC_LibNode.lib_IdString = (APTR)vString;
 
     AddLibrary((struct Library*)PowerPCBase);
 
@@ -443,7 +452,7 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
     myConsts->ic_SegList = seglist;
 
     D(("Started Library Init routine\n"));
-    D(("Version: %s\n", VSTRING));
+    D(("Version: %s\n", vString));
 
     if (!(SysBase->AttnFlags & (AFF_68040|AFF_68060)))
     {
@@ -2347,6 +2356,16 @@ struct InitData* SetupKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
         writememL(configBase, IMMR_POCMR1, POCMR_EN|cmSize);
     }
 
+    /*
+     * TSEC1 DISARMED BEFORE THE KERNEL STARTS (17.17, for killernic.device). IMASK is the
+     * driver's to set, after its INT2 server is in the chain: a TSEC left armed by a driver
+     * before a warm reset would otherwise have the new kernel ring the doorbell with no server
+     * to clear it. A doorbell bit left set is cleared as well (a 1 from PCI clears it, MPC8349EA
+     * RM Table 12-7, p. 554). NO COUNTERPART in 17.13b (below, at SIMSR_H).
+     */
+    writememL(configBase, IMMR_TSEC1_IMASK, 0);
+    writememL(configBase, IMMR_ODR, IMMR_ODR_TSEC1_68K);
+
     writememL(ppcmemBase, VEC_SYSTEMRESET - 4, OPCODE_FBRANCH);
     writememL(ppcmemBase, VEC_SYSTEMRESET, OPCODE_BBRANCH - 4);
 
@@ -2379,6 +2398,17 @@ struct InitData* SetupKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
 
     resetKiller(myConsts, configBase, ppcmemBase);
 
+    /*
+     * TSEC1'S INTERRUPTS TO THE CORE (17.17, 18 Nov 2026, the user: "go, interrupts"). With
+     * the core enabled they can reach the core alone (MPC8349EA RM 8.3.1, p. 330); the kernel's
+     * MPC8343E arm passes each one to the 68k through the outbound doorbell (kernel.c), for
+     * killernic.device's INT2 server. A TSEC whose IMASK is 0 raises none (p. 757), so this
+     * changes nothing until a driver arms it. 17.13b unmasks the message unit alone
+     * (powerpc.s:1412) and has no TSEC code: a search of src_173b's .s, .p and .i files for
+     * TSEC, IEVENT, IMASK, ODR and SIMSR finds that line and its two defines
+     * (68kdefines.i:204-205). NO COUNTERPART.
+     */
+    writememL(configBase, IMMR_SIMSR_H, SIMSR_H_TSEC1);
     writememL(configBase, IMMR_SIMSR_L, SIMSR_L_MU);
 
     return killerData;

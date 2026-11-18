@@ -2,7 +2,7 @@ Short:		Driver for G3/G4 PCI cards
 Uploader:	dennisvdboon@gmail.com (Dennis Boon)
 Author:		dennisvdboon -> gmail (Dennis Boon)
 Type:		driver/other
-Version:	17.16
+Version:	17.17
 Architecture:	m68k-amigaos = 3.9
 Distribution:	Aminet
 URL:		https://github.com/Sakura-IT/SonnetAmiga
@@ -175,6 +175,12 @@ It was a fun 9 year ride and thanks for your support! :-)
 
 
 -+-+-+-+-+-+-+-+-+-+-+-+-+
+
+What has changed since 17.16:
+
+- K1/M1 (PCI): the Ethernet controller's interrupt reaches the Amiga through
+  the card's doorbell, for killernic.device (which needs this version).
+- The version string is in the library once, as in 17.13b.
 
 What has changed since 17.15:
 

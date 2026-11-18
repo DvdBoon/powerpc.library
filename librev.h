@@ -23,7 +23,7 @@
 #include <exec/initializers.h>
 
 #define VERSION     17
-#define REVISION    16
+#define REVISION    17
 
 #define LIBNAME "powerpc.library"
 #if defined(G4_DSSALL)
@@ -43,7 +43,7 @@
 #elif defined(G4_EARLY_VEC)
 #define VSTRING "$VER: powerpc.library 17.16 (29.10.26) G4 early VEC test\r\n"
 #else
-#define VSTRING "$VER: powerpc.library 17.16 (14.11.26)\r\n"
+#define VSTRING "$VER: powerpc.library 17.17 (18.11.26)\r\n"
 #endif
 
 #define VERPCI      13

@@ -311,6 +311,32 @@ PPCKERNEL void Exception_Entry(__reg("r3") struct PrivatePPCBase* PowerPCBase, _
                      * unit (a search of warpos/ for IM0I, IMISR and MPC8343 finds no
                      * line, 12 Nov 2026).
                      */
+                    /*
+                     * TSEC1 FOR killernic.device (17.17, 18 Nov 2026, the user: "go,
+                     * interrupts"). With the core enabled the TSEC's interrupts reach this
+                     * core alone, never INTA (MPC8349EA RM 8.3.1, p. 330), and libinit.c's
+                     * SetupKiller unmasks them at the IPIC (SIMSR_H_TSEC1). An event the
+                     * driver armed (IEVENT & IMASK) is passed to the 68k: IMASK goes to 0,
+                     * which drops the TSEC's request (p. 757), and ODR0 is set, which raises
+                     * INTA (Table 12-7, p. 554). The driver's INT2 server clears ODR0 and
+                     * signals its task, which empties the rings and arms IMASK again; every
+                     * IMASK 0 written here is followed by a doorbell, so the driver always
+                     * re-arms. The sync keeps the doorbell behind the IMASK store. Nothing
+                     * else of the TSEC is touched and no Amiga memory is read. IMASK is 0
+                     * after reset and while no driver runs, so this passes nothing on then.
+                     * 17.13b has no TSEC code (a search of src_173b for TSEC, IEVENT, IMASK,
+                     * ODR and SIMSR finds only the message unit's enable, powerpc.s:1412):
+                     * NO COUNTERPART.
+                     */
+                    ULONG tsecMask = readmemLongPPC(IMMR_ADDR_DEFAULT, IMMR_TSEC1_IMASK);
+
+                    if ((tsecMask) && (readmemLongPPC(IMMR_ADDR_DEFAULT, IMMR_TSEC1_IEVENT) & tsecMask))
+                    {
+                        writememLongPPC(IMMR_ADDR_DEFAULT, IMMR_TSEC1_IMASK, 0);
+                        sync();
+                        storePCI(IMMR_ADDR_DEFAULT, IMMR_ODR, IMMR_ODR_TSEC1);
+                    }
+
                     ULONG imisr = loadPCI(IMMR_ADDR_DEFAULT, IMMR_IMISR);
 
                     if (imisr & IMMR_IMISR_IM0I)

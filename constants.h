@@ -569,6 +569,7 @@
 #define IMMR_OMISR              0x8030
 #define IMMR_IMR0               0x8050
 #define IMMR_OMR0               0x8058
+#define IMMR_ODR                0x8060      /* outbound doorbell, MPC8349EA RM Table 12-2 (p. 549) */
 #define IMMR_IDR                0x8068
 #define IMMR_IMISR              0x8080
 
@@ -632,6 +633,17 @@
 #define IMMR_IDR_IDR0           0x01000000
 #define IMMR_IDR_IMC            0x00000080
 
+/*
+ * TSEC1 FOR killernic.device (17.17). The TSEC's registers are big-endian (lwz/stw, and plain
+ * 68k moves); the doorbell is little-endian like the rest of the message unit, so ODR0 is 1 to
+ * the PPC's stwbrx and 0x01000000 to the 68k, as IDR0 above. The PPC sets ODR bits, a 1 written
+ * from PCI clears them, and a set bit raises INTA (Table 12-7, p. 554).
+ */
+#define IMMR_TSEC1_IEVENT       0x24010     /* Table 15-4 (p. 757-760) */
+#define IMMR_TSEC1_IMASK        0x24014
+#define IMMR_ODR_TSEC1          0x00000001  /* ODR0, as the PPC writes it */
+#define IMMR_ODR_TSEC1_68K      0x01000000  /* ODR0, as the 68k writes it */
+
 #define PIWAR_EN                0x80000000
 #define PIWAR_PF                0x20000000
 #define PIWAR_RTT_SNOOP         0x00060000
@@ -677,6 +689,7 @@
 #define PEX_MISCR_MSIE          0x00000001
 
 #define SIMSR_L_MU              0x04000000
+#define SIMSR_H_TSEC1           0xE0000000  /* TSEC1 Tx, Rx, Err: bits 0-2 (MPC8349EA RM Table 8-7, p. 338) */
 #define SIMSR_H_PEX1CNT         0x00008000
 #define SIMSR_H_DMAC            0x00002000
 #define SIMSR_H_I2C             0x00000004
