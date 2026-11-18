@@ -2585,13 +2585,24 @@ static ULONG harrierPciMemory(struct InternalConsts* myConsts, ULONG ppcdevice, 
  * The inbound windows for a layout of the sizes above: window 1 from RAM offset 0 and, for the three layouts
  * of two pieces, window 2 above it with ITAT2 enabled. window2Was says that an earlier layout had window 2 on,
  * and it is switched off again when this one has a single piece.
+ *
+ * moved says that window 1 is already mapped and now goes to a smaller layout: its size is then written before
+ * its address. ITBAR1's writable bits follow the size in force (Harrier programmer's guide, Table 3-24, PDF 238):
+ * under 256 MB bit 27 is fixed at zero, so 0x08000000 written first became address 0, and the 128 MB window then
+ * lay on top of a Voodoo at PCI address 0: a frozen Amiga on a cold boot of a 128 MB card (18 Nov 2026). The first
+ * mapping keeps the address first: the size is still 4 KB there, and a size written first would open the window
+ * at address 0. 17.15 has the same two orders (src_175/libinit.c:1894-1900 and :1978-1979); 17.13b stops with an
+ * error instead of moving the window (powerpc.s:1183-1202).
  */
 static ULONG harrierWindows(struct InternalConsts* myConsts, ULONG devfuncnum, ULONG offset, ULONG ppcmemBase,
-                            ULONG ppcmemSize, ULONG window2Was)
+                            ULONG ppcmemSize, ULONG window2Was, ULONG moved)
 {
     ULONG resl;
 
-    WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR1, (ppcmemBase - offset));
+    if (!(moved))
+    {
+        WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR1, (ppcmemBase - offset));
+    }
 
     switch (ppcmemSize)
     {
@@ -2645,6 +2656,11 @@ static ULONG harrierWindows(struct InternalConsts* myConsts, ULONG devfuncnum, U
             PrintCrtErr(myConsts, "Could not allocate sufficient PCI memory");
             return FALSE;
         }
+    }
+
+    if (moved)
+    {
+        WriteConfigLong(myConsts, devfuncnum, PCFS_ITBAR1, (ppcmemBase - offset));
     }
 
     if ((window2Was) && ((ppcmemSize == 0x10000000) || (ppcmemSize == 0x8000000) || (ppcmemSize == 0x4000000)))
@@ -2848,7 +2864,7 @@ struct InitData* SetupHarrier(struct InternalConsts* myConsts, ULONG devfuncnum,
 
     writememL(configBase, XCSR_SDBAA, (valueSDBAA | XCSR_SDBA_ENA));
 
-    if (!(harrierWindows(myConsts, devfuncnum, offset, ppcmemBase, ppcmemSize, 0)))
+    if (!(harrierWindows(myConsts, devfuncnum, offset, ppcmemBase, ppcmemSize, 0, FALSE)))
     {
         return FALSE;
     }
@@ -2910,7 +2926,7 @@ struct InitData* SetupHarrier(struct InternalConsts* myConsts, ULONG devfuncnum,
 
         writememL(configBase, XCSR_SDBAA, (valueSDBAA | XCSR_SDBA_ENA));
 
-        if (!(harrierWindows(myConsts, devfuncnum, offset, ppcmemBase, ppcmemSize, window2On)))
+        if (!(harrierWindows(myConsts, devfuncnum, offset, ppcmemBase, ppcmemSize, window2On, TRUE)))
         {
             return FALSE;
         }

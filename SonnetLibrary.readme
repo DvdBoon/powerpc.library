@@ -183,6 +183,8 @@ What has changed since 17.16:
   If its network stays dead, run cardreset before this library is opened.
 - The version string is in the library once, as in 17.13b.
 - K1/M1 with a Voodoo card on a FireStorm: the warning at start-up is gone.
+- Harrier with 128MB and a Voodoo card on a FireStorm: no more freeze at the
+  first start after switching on.
 
 What has changed since 17.15:
 
