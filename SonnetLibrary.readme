@@ -180,6 +180,7 @@ What has changed since 17.16:
 
 - K1/M1 (PCI): the Ethernet controller's interrupt reaches the Amiga through
   the card's doorbell, for killernic.device (which needs this version).
+  If its network stays dead, run cardreset before this library is opened.
 - The version string is in the library once, as in 17.13b.
 
 What has changed since 17.15:
