@@ -172,6 +172,11 @@ What has changed since 17.16:
   the card's doorbell, for killernic.device (which needs this version).
   If its network stays dead, run cardreset before this library is opened.
   cardreset leaves a card that is already ready alone.
+- K1/M1 (PCI): killerusb.device drives the card's USB port under Poseidon
+  (tested with 4.5: USB drives, mice, keyboards and hubs). Put it in
+  DEVS:USBHardware/ and set it online in Trident once this library can be
+  opened. If the screen goes dark when Trident opens, take the other drivers
+  out of that folder.
 - The version string is in the library once, as in 17.13b.
 - K1/M1 with a Voodoo card on a FireStorm: the warning at start-up is gone.
 - Harrier with 128MB and a Voodoo card on a FireStorm: no more freeze at the
