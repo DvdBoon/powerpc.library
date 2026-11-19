@@ -129,6 +129,7 @@ UWORD                   ic_gfxSubType;
 UWORD                   ic_pciType;
 UWORD                   ic_ErrShown;    /* L2: PrintCrtErr has shown its requester and run CleanUp */
 ULONG                   ic_bridgeBase;  /* FireStorm: the Amiga address of PCI address 0 (libinit.c) */
+ULONG                   ic_gfx2Config;  /* FireStorm, a Voodoo mapped: a Radeon's BAR2, 0 for none (libinit.c) */
 };
 
 struct InitData {
@@ -151,6 +152,7 @@ ULONG               id_MPICBase;
 ULONG               id_StartBat;
 ULONG               id_SizeBat;
 ULONG               id_BatICache;   /* nonzero: BAT3's instruction side cached (SetupKiller, FireStorm; setupppc.c) */
+ULONG               id_Gfx2ConfigBase; /* a second card's register window, 64 KB, 0 for none (FireStorm; setupppc.c) */
 };
 
 struct MemSettings {

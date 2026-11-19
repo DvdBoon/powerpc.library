@@ -606,6 +606,7 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
 
     myConsts->ic_startBAT = 0;
     myConsts->ic_sizeBAT = 0;
+    myConsts->ic_gfx2Config = 0;     /* radeonbar2: set on a FireStorm with a Voodoo and a Radeon */
 
     if (myConsts->ic_pciType == VENDOR_ELBOX)
     {
@@ -792,6 +793,31 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
             myConsts->ic_gfxType = VENDOR_3DFX;
 
             D(("3DFX card detected, Gfx address at %08lx, config address at %08lx\n", myConsts->ic_gfxMem, myConsts->ic_gfxConfig));
+
+            /*
+             * THE SECOND GRAPHICS CARD'S REGISTERS (19 Nov 2026, the user: "go,
+             * radeonbar2"): with the Voodoo as the card the PPC maps, a Radeon
+             * next to it had no mapping, and a PPC driver's access to its
+             * registers was a data exception (DAR = BAR2 + 0x9000). The first
+             * Radeon of atiList keeps its BAR2 (PRM_MemoryAddr2, its 64 KB
+             * register window, as the ATI branch below reads it) in
+             * ic_gfx2Config; mmuSetup maps it (setupppc.c). NO COUNTERPART in
+             * 17.13b (powerpc.s:357-359: an ATI's window only for an ATI main card).
+             */
+            {
+                ULONG radeonNo;
+                struct PCIBoard* radeon;
+
+                for (radeonNo = 0; atiList[radeonNo]; radeonNo++)
+                {
+                    if (radeon = Prm_FindBoardTags(NULL, PRM_Vendor, VENDOR_ATI, PRM_Device, atiList[radeonNo], TAG_DONE))
+                    {
+                        Prm_GetBoardAttrsTags(radeon, PRM_MemoryAddr2, (ULONG)&myConsts->ic_gfx2Config, TAG_DONE);
+                        D(("Second card, a Radeon: registers at %08lx\n", myConsts->ic_gfx2Config));
+                        break;
+                    }
+                }
+            }
         }
         else
         {
@@ -2359,6 +2385,7 @@ struct InitData* SetupPKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
     killerData->id_GfxType       = myConsts->ic_gfxType;
     killerData->id_GfxSubType    = myConsts->ic_gfxSubType;
     killerData->id_GfxConfigBase = myConsts->ic_gfxConfig;
+    killerData->id_Gfx2ConfigBase = myConsts->ic_gfx2Config;
     killerData->id_Environment1  = myConsts->ic_env1;
     killerData->id_Environment2  = myConsts->ic_env2;
     killerData->id_Environment3  = myConsts->ic_env3;
@@ -2599,6 +2626,7 @@ struct InitData* SetupKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
     killerData->id_GfxType       = myConsts->ic_gfxType;
     killerData->id_GfxSubType    = myConsts->ic_gfxSubType;
     killerData->id_GfxConfigBase = myConsts->ic_gfxConfig;
+    killerData->id_Gfx2ConfigBase = myConsts->ic_gfx2Config;
     killerData->id_Environment1  = myConsts->ic_env1;
     killerData->id_Environment2  = myConsts->ic_env2;
     killerData->id_Environment3  = myConsts->ic_env3;
@@ -3197,6 +3225,7 @@ struct InitData* SetupHarrier(struct InternalConsts* myConsts, ULONG devfuncnum,
     harrierData->id_GfxType       = myConsts->ic_gfxType;
     harrierData->id_GfxSubType    = myConsts->ic_gfxSubType;
     harrierData->id_GfxConfigBase = myConsts->ic_gfxConfig;
+    harrierData->id_Gfx2ConfigBase = myConsts->ic_gfx2Config;
     harrierData->id_Environment1  = myConsts->ic_env1;
     harrierData->id_Environment2  = myConsts->ic_env2;
     harrierData->id_Environment3  = myConsts->ic_env3;
@@ -3331,6 +3360,7 @@ struct InitData* SetupMPC107(struct InternalConsts* myConsts, ULONG devfuncnum,
     mpc107Data->id_GfxType       = myConsts->ic_gfxType;
     mpc107Data->id_GfxSubType    = myConsts->ic_gfxSubType;
     mpc107Data->id_GfxConfigBase = myConsts->ic_gfxConfig;
+    mpc107Data->id_Gfx2ConfigBase = myConsts->ic_gfx2Config;
     mpc107Data->id_Environment1  = myConsts->ic_env1;
     mpc107Data->id_Environment2  = myConsts->ic_env2;
     mpc107Data->id_Environment3  = myConsts->ic_env3;

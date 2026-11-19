@@ -177,6 +177,11 @@ PPCSETUP void mmuSetup(__reg("r3") struct InitData* initData)
     ULONG startEffAddr, endEffAddr, physAddr, WIMG, ppKey;
     struct PPCZeroPage *myZP = 0;
     ULONG PTSizeShift        = myZP->zp_MemSize + initData->id_GfxMemSize;
+
+    if (initData->id_Gfx2ConfigBase)
+    {
+        PTSizeShift += 0x10000;      /* the second card's register window, below */
+    }
     ULONG shiftVal           = 23;
 
     leadZeros = getLeadZ(PTSizeShift);
@@ -313,6 +318,34 @@ PPCSETUP void mmuSetup(__reg("r3") struct InitData* initData)
             }
             batSize = BAT_BL_16M;
             break;
+        }
+    }
+
+    /*
+     * THE SECOND GRAPHICS CARD'S REGISTERS (19 Nov 2026, the user: "go,
+     * radeonbar2", after the Warp3D thread's handover). With a Voodoo as the
+     * card mapped above, a Radeon next to it had no mapping: a PPC driver's
+     * first access to its registers was a data exception (GLQuake with the
+     * R200 driver installed: DAR = BAR2 + 0x9000, ramlib_PPC). libinit.c finds
+     * the Radeon on a FireStorm and passes its BAR2; it is mapped here as the
+     * ATI case above maps an ATI main card's register window: 64 KB,
+     * cache-inhibited and guarded, user read/write, physical = effective +
+     * OFFSET_PCIMEM. NO COUNTERPART in 17.13b, which maps an ATI's register
+     * window only when the ATI is the card it picked (powerpc.s:357-359,
+     * :1340-1350).
+     */
+    if (initData->id_Gfx2ConfigBase)
+    {
+        startEffAddr = initData->id_Gfx2ConfigBase;
+        endEffAddr   = startEffAddr + 0x10000;
+        physAddr     = startEffAddr + OFFSET_PCIMEM;
+        WIMG         = PTE_CACHE_INHIBITED | PTE_GUARDED;
+        ppKey        = PP_USER_RW;
+
+        if (!(setupTBL(startEffAddr, endEffAddr, physAddr, WIMG, ppKey)))
+        {
+            initData->id_Status = ERR_PPCMMU;
+            return;
         }
     }
 

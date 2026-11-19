@@ -202,6 +202,8 @@ What has changed since 17.16:
   adds the Radeon's memory as extra memory; PPC code runs from it at full speed.
 - FireStorm with a second graphics card below the Voodoo: the Harrier and MPC107
   set-ups also use the board's base (tested on a Harrier and an MPC107 card).
+- FireStorm with a Voodoo and a Radeon: PPC programs can reach the Radeon's
+  registers (a Warp3D driver for the Radeon no longer crashes in ramlib_PPC).
 
 What has changed since 17.15:
 
