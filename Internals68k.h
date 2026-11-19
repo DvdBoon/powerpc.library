@@ -78,6 +78,7 @@ struct PPCBase* LibInit(__reg("d0") struct PPCBase *ppcbase,
 BPTR   myExpunge(__reg("a6") struct PPCBase* PowerPCBase);
 
 void   getENVs      (struct InternalConsts* myConsts);
+ULONG  findRadeonMem(struct InternalConsts* myConsts, ULONG* usable);
 void   PrintCrtErr  (struct InternalConsts* myConsts, UBYTE* crterrtext);
 void   PrintError   (struct ExecBase* SysBase, UBYTE* errortext);
 void   MasterControl(void);

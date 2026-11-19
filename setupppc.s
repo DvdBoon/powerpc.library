@@ -51,6 +51,7 @@
         .long   0               #MPIC
         .long   0               #StartBAT
         .long   0               #SizeBAT
+        .long   0               #BatICache (id_BatICache)
 
 #*********************************************************
 

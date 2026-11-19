@@ -150,6 +150,7 @@ ULONG               id_MsgsBase;
 ULONG               id_MPICBase;
 ULONG               id_StartBat;
 ULONG               id_SizeBat;
+ULONG               id_BatICache;   /* nonzero: BAT3's instruction side cached (SetupKiller, FireStorm; setupppc.c) */
 };
 
 struct MemSettings {

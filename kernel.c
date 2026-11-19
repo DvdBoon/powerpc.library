@@ -2972,6 +2972,39 @@ PPCKERNEL ULONG KCachedLine(__reg("r3") struct PrivatePPCBase* PowerPCBase, __re
 *
 *********************************************************************************************/
 
+PPCKERNEL ULONG KICachedLine(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("r4") ULONG line)
+{
+    /*
+     * A LINE THE PPC'S INSTRUCTION CACHE CAN HOLD: KCachedLine's, and BAT3
+     * when its instruction side is cached (ENV:sonnet/AddRadeonMem on a
+     * FireStorm, setupppc.c, id_BatICache). Only SetCache's ranged
+     * CACHE_ICACHEINV asks this; BAT3's data side stays cache-inhibited, so
+     * the data cache operations keep KCachedLine. The IBAT as recorded in
+     * pp_SystemBATs[3] (setupppc.c, mvfrBAT3): BEPI, and (BL + 1) blocks of
+     * 128 KB, as KCachedLine reads BAT1. NO COUNTERPART in 17.13b, whose
+     * IBAT3 is always cache-inhibited (setupppc.p:1587).
+     */
+    ULONG ibatu = PowerPCBase->pp_SystemBATs[3].ba_ibatu;
+    ULONG ibatl = PowerPCBase->pp_SystemBATs[3].ba_ibatl;
+
+    if (KCachedLine(PowerPCBase, line))
+    {
+        return TRUE;
+    }
+    if ((ibatu & (BAT_VALID_SUPERVISOR | BAT_VALID_USER)) && (!(ibatl & BAT_CACHE_INHIBITED)) &&
+        ((line - (ibatu & 0xfffe0000)) < ((((ibatu >> 2) & 0x7ff) + 1) << 17)))
+    {
+        return TRUE;                                //BAT3, instruction side cached
+    }
+    return FALSE;
+}
+
+/********************************************************************************************
+*
+*
+*
+*********************************************************************************************/
+
 PPCKERNEL VOID L2InvWait(VOID)
 {
     /*
@@ -3272,7 +3305,7 @@ PPCKERNEL VOID KSetCache(__reg("r3") struct PrivatePPCBase* PowerPCBase, __reg("
 
                 for (int i = 0; i < iterations; i++)
                 {
-                    if (KCachedLine(PowerPCBase, mem))              //C2
+                    if (KICachedLine(PowerPCBase, mem))             //C2; BAT3's cached instruction side too
                     {
                         iInval(mem);
                     }

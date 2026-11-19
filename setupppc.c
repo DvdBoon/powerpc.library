@@ -359,10 +359,47 @@ PPCSETUP void mmuSetup(__reg("r3") struct InitData* initData)
         {
             batSize = BAT_BL_256M;
         }
-        ibatl = (initData->id_StartBat + OFFSET_PCIMEM) | BAT_CACHE_INHIBITED | BAT_READ_WRITE;
+        dbatl = (initData->id_StartBat + OFFSET_PCIMEM) | BAT_CACHE_INHIBITED | BAT_READ_WRITE;
         ibatu = initData->id_StartBat | batSize | BAT_VALID_SUPERVISOR | BAT_VALID_USER;
+        ibatl = dbatl;
 
-        setBAT3(ibatl, ibatu, ibatl, ibatu);
+        /*
+         * THE INSTRUCTION SIDE CACHED ON A FIRESTORM (ENV:sonnet/AddRadeonMem;
+         * the user, 19 Nov 2026: "but can we not enable instruction cache then
+         * for the Radeon VGA?"). Code run from the Radeon's memory took about 87
+         * times as long a pass as from the M1's (tests/radeontime). The data
+         * side stays cache-inhibited: the 68k reaches that memory without
+         * passing the M1's snoop. The instruction cache sees no stores at all,
+         * on any memory, and the kernel already flushes it whenever another
+         * task resumes (kernel.s, ZP_EXIT_ICFLUSH) and on SetCache's
+         * CACHE_ICACHEINV, whose ranged form now reaches BAT3 too (kernel.c
+         * KICachedLine). The IBAT as BAT1's above: no W, no G. SetupKiller sets
+         * id_BatICache for a FireStorm only; the Mediator keeps 17.13b's
+         * cache-inhibited IBAT3. DIVERGES from 17.13b (setupppc.p:1587, one
+         * value for IBAT3 and DBAT3) on a FireStorm only.
+         */
+        if (initData->id_BatICache)
+        {
+            ibatl = (initData->id_StartBat + OFFSET_PCIMEM) | BAT_READ_WRITE;
+        }
+#ifdef RADEON_DCACHE
+        /*
+         * THE TEST LIBRARY ONLY (build.ps1 -RadeonDCache; the user, 19 Nov
+         * 2026: "Can you make me a test library to test how fast the memory
+         * will be if cached"): the data side copy-back too, WIMG 0 as the
+         * instruction side above. The 68k's accesses to that memory do not
+         * pass the M1's snoop, so the two CPUs can see different data, and
+         * SetCache's ranged data operations leave these lines alone
+         * (KCachedLine): for timing the PPC alone (tests/radeondata), never for
+         * use. NO COUNTERPART in 17.13b (setupppc.p:1587: cache-inhibited).
+         */
+        if (initData->id_BatICache)
+        {
+            dbatl = (initData->id_StartBat + OFFSET_PCIMEM) | BAT_READ_WRITE;
+        }
+#endif
+
+        setBAT3(ibatl, ibatu, dbatl, ibatu);
         mSync();
     }
 

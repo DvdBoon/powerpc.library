@@ -384,6 +384,7 @@ VOID KSendMsgFramePPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFr
 VOID KFreeMsgFramePPC(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct MsgFrame* msgFrame);
 ULONG KSystemCall(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct SysCall* sc);   /* kernel.c; libinit.c stores its address */
 ULONG KCachedLine(__r3 struct PrivatePPCBase* PowerPCBase, __r4 ULONG line);           /* kernel.c: may the PPC cache this line? (C2) */
+ULONG KICachedLine(__r3 struct PrivatePPCBase* PowerPCBase, __r4 ULONG line);          /* kernel.c: may its instruction cache? (BAT3) */
 ULONG CallKernel(__r3 struct PrivatePPCBase* PowerPCBase, __r4 struct SysCall* sc);    /* supportppc.c: "sc", or KSystemCall in a handler */
 LONG StricmpPPC(__r3 STRPTR string1, __r4 STRPTR string2);
 VOID CauseDECInterrupt(__r3 struct PrivatePPCBase* PowerPCBase);

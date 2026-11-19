@@ -103,6 +103,11 @@ are:
   cache is on the CPU. **USE AT OWN RISK!!!**
 - ReportG4asG3 (0 or 1): If set, a G4 is reported as a G3 by GetCPU() and by
   GetInfo() (CPU and PVR), and AltiVec is not enabled. Default = 0.
+- AddRadeonMem (0 or 1): On a FireStorm with a Voodoo as the screen and a
+  K1/M1 (PCI): the memory of a Radeon card becomes extra memory for the PPC
+  and the 68K. The Radeon's monitor driver must be in DEVS:Monitors; without
+  it the Amiga freezes when this library starts. Do not open a screen on the
+  Radeon. Default = 0.
  
 Notes:
  
@@ -183,6 +188,8 @@ What has changed since 17.16:
   first start after switching on.
 - FireStorm with a second graphics card at a lower PCI address than the Voodoo
   (e.g. a Radeon): no more freeze when this library opens (tested on a PCI M1).
+- FireStorm with a Voodoo, a Radeon and a K1/M1 (PCI): new option AddRadeonMem
+  adds the Radeon's memory as extra memory; PPC code runs from it at full speed.
 
 What has changed since 17.15:
 

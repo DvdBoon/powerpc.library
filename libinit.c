@@ -217,6 +217,16 @@ static const ULONG cardList[] =
     0
 };
 
+/* ENV:sonnet/AddRadeonMem (findRadeonMem, below getENVs) */
+#define RADEON_MINBAT   0x4000000       /* BAT3's sizes: 64, 128 and 256 MB (setupppc.c) */
+#define RADEON_MAXBAT   0x10000000
+#define RADEON_WIN0     0x20000000      /* the FireStorm's window 0 spans PCI 0 to 512 MB (SetupKiller) */
+#define RADEON_MINLEN   0x100000        /* less tested good than 1 MB is not added */
+#define RADEON_MARK     0x5241444DUL    /* "RADM", the marker of the size test */
+#define RADEON_HDR      64              /* the MemHeader and its name, before the free chunk */
+#define RADEON_PRI      -15             /* 17.13b's priority for "pcidma memory" (powerpc.s:416) */
+#define RADEON_NAME     "radeon memory"
+
 static const ULONG atiList[] =
 {
     DEVICE_RV280PRO,
@@ -431,6 +441,7 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
     volatile ULONG status;
     struct PPCZeroPage *myZeroPage;
     struct MemHeader *myPPCMemHeader;
+    ULONG radeonBase = 0, radeonLen = 0;     /* ENV:sonnet/AddRadeonMem: findRadeonMem */
     struct InitData *cardData;
     APTR nameSpace = NULL;
 
@@ -838,6 +849,17 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
 
     getENVs(myConsts);
 
+    /*
+     * ENV:sonnet/AddRadeonMem: on a FireStorm with a Voodoo as the screen and
+     * a K1 or PCI M1, the memory of a Radeon becomes extra memory
+     * (findRadeonMem, below getENVs). It goes into the memory list once the
+     * library base is set up.
+     */
+    if ((myConsts->ic_pciType == VENDOR_E3B) && (deviceID == DEVICE_MPC8343E) && (myConsts->ic_gfxType == VENDOR_3DFX))
+    {
+        radeonBase = findRadeonMem(myConsts, &radeonLen);
+    }
+
     initPointer   = (*((ULONG*)(seglist << 2)) << 2);                   //setup
     kernelPointer = (*((ULONG*)(initPointer)) << 2);                   //kernel
     funPointer    = (*((ULONG*)(kernelPointer)) << 2);                //functions
@@ -1148,6 +1170,42 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
     }
 
     D(("Library base set up at %08lx\n", PowerPCBase));
+
+    /*
+     * ENV:sonnet/AddRadeonMem: THE RADEON'S MEMORY IN THE MEMORY LIST. The
+     * header and its name sit at the start of that memory, the free chunk
+     * from RADEON_HDR on. Priority -15, as 17.13b gave the Mediator's
+     * "pcidma memory" (powerpc.s:416, :422), so the M1's own memory
+     * (priority 1) is used first; the attributes are the M1's (above), so
+     * the PPC's MEMF_PPC requests reach it. The PPC maps it through BAT3
+     * since its start (setupppc.c). DIVERGES from 17.13b, which only changed
+     * the priority of a node the Mediator had made; it made none itself.
+     */
+    if (radeonBase)
+    {
+        struct MemHeader* radeonHeader = (struct MemHeader*)radeonBase;
+
+        CopyMem((APTR)RADEON_NAME, (APTR)(radeonBase + sizeof(struct MemHeader)), sizeof(RADEON_NAME));
+
+        radeonHeader->mh_Node.ln_Type    = NT_MEMORY;
+        radeonHeader->mh_Node.ln_Pri     = RADEON_PRI;
+        radeonHeader->mh_Node.ln_Name    = (char*)(radeonBase + sizeof(struct MemHeader));
+        radeonHeader->mh_Attributes      = MEMF_PUBLIC|MEMF_FAST|MEMF_PPC;
+        radeonHeader->mh_First           = (struct MemChunk*)(radeonBase + RADEON_HDR);
+        radeonHeader->mh_Lower           = (APTR)(radeonBase + RADEON_HDR);
+        radeonHeader->mh_Upper           = (APTR)(radeonBase + radeonLen);
+        radeonHeader->mh_Free            = radeonLen - RADEON_HDR;
+        radeonHeader->mh_First->mc_Next  = NULL;
+        radeonHeader->mh_First->mc_Bytes = radeonLen - RADEON_HDR;
+
+        CacheClearU();
+
+        Disable();
+        Enqueue(&SysBase->MemList, (struct Node*)radeonHeader);
+        Enable();
+
+        D(("AddRadeonMem: %08lx bytes of Radeon memory at %08lx in the memory list\n", radeonLen - RADEON_HDR, radeonBase + RADEON_HDR));
+    }
 
     PowerPCBase->PPC_DosLib  = (APTR)DOSBase;
     PowerPCBase->PPC_SegList = (APTR)seglist;
@@ -1786,6 +1844,144 @@ void getENVs(struct InternalConsts* myConsts)
     myConsts->ic_env4 |= (doENV(myConsts,"sonnet/ReportG4asG3") << 24);
     return;
 }
+
+/*
+ * ENV:sonnet/AddRadeonMem (the user, 19 Nov 2026: "add Radeon memory as PPC
+ * memory when there is a voodoo and PCI K1/M1 present", "Put it behind an ENV
+ * called AddRadeonMem"). Called on a FireStorm with a Voodoo as the screen and
+ * a K1 or PCI M1. With the variable set to 1, the memory of the first Radeon of
+ * atiList becomes memory for both CPUs, as 17.13b made the Mediator's "pcidma
+ * memory" (powerpc.s:384-425). No graphics driver may use that Radeon.
+ *
+ * THE PATH. The PPC reaches it through BAT3 (setupppc.c: EA = the Amiga
+ * address, PA = EA + OFFSET_PCIMEM, cache-inhibited) and outbound window 0,
+ * which on a FireStorm carries PCI 0 to 512 MB from ic_bridgeBase +
+ * OFFSET_PCIMEM (SetupKiller). prometheus.library gives a card the board's
+ * base plus its PCI address (PromLib driver_2.c:1035), so the Radeon's PCI
+ * address is its Amiga address minus ic_bridgeBase; it must lie in window 0's
+ * 512 MB, and BAT3 holds 64, 128 or 256 MB aligned to its size.
+ *
+ * THE TEST, from the 68k, before the PPC starts: two data patterns at the
+ * start, then a marker at every power-of-two offset from 4 bytes to half the
+ * BAR, written from the highest down and offset 0 last. Memory that ends or
+ * wraps at an offset gives that offset back the marker of offset 0, so the
+ * first offset that does not hold its own marker is the size. (A Radeon's BAR
+ * can hold its memory twice, the second half for byte swapping.) The writes
+ * go out of the 68k's caches (CacheClearU) before the reads.
+ *
+ * Returns the Amiga address and puts the tested size in *usable, or returns
+ * 0. Sets ic_startBAT and ic_sizeBAT for BAT3 (SetupKiller passes them on).
+ * NO COUNTERPART in 17.13b on a FireStorm: a grep for firestorm and
+ * prometheus over src_173b finds nothing.
+ */
+ULONG findRadeonMem(struct InternalConsts* myConsts, ULONG* usable)
+{
+    struct ExecBase* SysBase = myConsts->ic_SysBase;
+    struct Library* PrometheusBase = (struct Library*)myConsts->ic_PciBase;
+    struct PCIBoard* board = NULL;
+    volatile ULONG* mem;
+    ULONG addr = 0, size = 0, pciAddr, len, batSize, i;
+
+    *usable = 0;
+
+    if (!(doENV(myConsts, "sonnet/AddRadeonMem")))
+    {
+        return 0;
+    }
+
+    for (i = 0; atiList[i]; i++)
+    {
+        if (board = Prm_FindBoardTags(NULL, PRM_Vendor, VENDOR_ATI, PRM_Device, atiList[i], TAG_DONE))
+        {
+            break;
+        }
+    }
+
+    if (!(board))
+    {
+        D(("AddRadeonMem: no Radeon found\n"));
+        return 0;
+    }
+
+    Prm_GetBoardAttrsTags(board, PRM_MemoryAddr0, (ULONG)&addr,
+                                 PRM_MemorySize0, (ULONG)&size,
+                                 TAG_DONE);
+
+    D(("AddRadeonMem: Radeon memory at %08lx, BAR size %08lx\n", addr, size));
+
+    if (size > RADEON_MAXBAT)
+    {
+        size = RADEON_MAXBAT;
+    }
+
+    pciAddr = addr - myConsts->ic_bridgeBase;
+
+    if ((size < RADEON_MINBAT) || (addr & (size - 1)) || (pciAddr >= RADEON_WIN0) || ((RADEON_WIN0 - pciAddr) < size))
+    {
+        D(("AddRadeonMem: refused, size %08lx at PCI address %08lx\n", size, pciAddr));
+        return 0;
+    }
+
+    mem = (volatile ULONG*)addr;
+
+    mem[0] = 0x55555555;
+    mem[1] = 0xAAAAAAAA;
+    CacheClearU();
+
+    if ((mem[0] != 0x55555555) || (mem[1] != 0xAAAAAAAA))
+    {
+        D(("AddRadeonMem: data test 1 read %08lx %08lx\n", mem[0], mem[1]));
+        return 0;
+    }
+
+    mem[0] = 0xAAAAAAAA;
+    mem[1] = 0x55555555;
+    CacheClearU();
+
+    if ((mem[0] != 0xAAAAAAAA) || (mem[1] != 0x55555555))
+    {
+        D(("AddRadeonMem: data test 2 read %08lx %08lx\n", mem[0], mem[1]));
+        return 0;
+    }
+
+    for (len = (size >> 1); len >= 4; len >>= 1)
+    {
+        mem[len >> 2] = RADEON_MARK ^ len;
+    }
+    mem[0] = RADEON_MARK;
+    CacheClearU();
+
+    if (mem[0] != RADEON_MARK)
+    {
+        D(("AddRadeonMem: offset 0 read %08lx\n", mem[0]));
+        return 0;
+    }
+
+    for (len = 4; len < size; len <<= 1)
+    {
+        if (mem[len >> 2] != (RADEON_MARK ^ len))
+        {
+            break;
+        }
+    }
+
+    D(("AddRadeonMem: %08lx bytes tested good\n", len));
+
+    if (len < RADEON_MINLEN)
+    {
+        return 0;
+    }
+
+    for (batSize = RADEON_MINBAT; batSize < len; batSize <<= 1)
+    {
+    }
+
+    myConsts->ic_startBAT = addr;
+    myConsts->ic_sizeBAT  = batSize;
+    *usable = len;
+
+    return addr;
+}
 /********************************************************************************************
 *
 *	Various support routines for PPC set-up.
@@ -2335,8 +2531,15 @@ struct InitData* SetupKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
      * which need not reach the second card. ic_sizeBAT is only set behind a
      * Mediator, where the detection runs. FIXES.md "#3: RESTORE 17.13b's
      * MAPPING", 1 Nov 2026.
+     *
+     * ON A FIRESTORM (ENV:sonnet/AddRadeonMem, 19 Nov 2026) ic_sizeBAT can be
+     * set as well, for a Radeon's memory (findRadeonMem). Window 0 above
+     * already carries PCI 0 to 512 MB there, the Radeon's memory included,
+     * and an outbound window must not overlap another (MPC8349EA RM p. 546),
+     * so window 1 stays shut. MATCHES 17.13b for the Mediator (DoSecWin,
+     * powerpc.s:1352-1374); NO COUNTERPART on a FireStorm.
      */
-    if (myConsts->ic_sizeBAT)
+    if ((myConsts->ic_sizeBAT) && (myConsts->ic_pciType == VENDOR_ELBOX))
     {
         ULONG cmSize, lawSize;
 
@@ -2403,6 +2606,13 @@ struct InitData* SetupKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
     killerData->id_ConfigBase    = configBase;
     killerData->id_StartBat      = myConsts->ic_startBAT;
     killerData->id_SizeBat       = myConsts->ic_sizeBAT;
+    /*
+     * ENV:sonnet/AddRadeonMem: on a FireStorm, BAT3's instruction side cached
+     * (setupppc.c, id_BatICache). The Mediator's "pcidma memory" keeps 17.13b's
+     * cache-inhibited IBAT3. The other set-ups leave the 0 of the copied
+     * segment (setupppc.s, #BatICache).
+     */
+    killerData->id_BatICache     = ((myConsts->ic_sizeBAT) && (myConsts->ic_pciType == VENDOR_E3B));
 
     writememL(ppcmemBase, VEC_SYSTEMRESET, OPCODE_FBRANCH + OFFSET_ZEROPAGE + OFFSET_KERNEL - VEC_SYSTEMRESET);
 
