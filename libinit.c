@@ -3102,7 +3102,19 @@ struct InitData* SetupHarrier(struct InternalConsts* myConsts, ULONG devfuncnum,
 
     if (myConsts->ic_pciType == VENDOR_E3B)
     {
-        value = myConsts->ic_gfxMem;
+        /*
+         * THE BOARD'S BASE, NOT THE GRAPHICS CARD'S ADDRESS (19 Nov 2026, the
+         * user: "go harrierbase"). The Harrier adds OTOF0 to the upper 16 bits
+         * of the PPC's address (Harrier programmer's guide p. 3-45), and the PPC
+         * reaches a card at its Amiga address + OFFSET_PCIMEM (BAT1, setupppc.c),
+         * so the window must take ic_bridgeBase + OFFSET_PCIMEM to PCI 0:
+         * prometheus.library gives a card the board's base plus its PCI address
+         * (PromLib driver_2.c:1035). ic_gfxMem, used here up to now as in 17.15
+         * (src_175/libinit.c:1955-1958), is that base only when the graphics
+         * card sits at PCI 0; with a Radeon there and the Voodoo above it the
+         * PPC's Voodoo accesses went to the Radeon. NO COUNTERPART in 17.13b.
+         */
+        value = myConsts->ic_bridgeBase;
         value2 = ((-(value + OFFSET_PCIMEM)) | XCSR_OTAT_ENA | XCSR_OTAT_WPE | XCSR_OTAT_SGE | XCSR_OTAT_RAE | XCSR_OTAT_MEM);
     }
     else
@@ -3159,7 +3171,8 @@ struct InitData* SetupHarrier(struct InternalConsts* myConsts, ULONG devfuncnum,
 
     if (myConsts->ic_pciType == VENDOR_E3B)
     {
-        if (ppcmemBase + ppcmemSize == myConsts->ic_gfxMem + 0x20000000)
+        /* the end of the board's 512 MB from its base, as the window above (17.15: ic_gfxMem, src_175/libinit.c:1985) */
+        if (ppcmemBase + ppcmemSize == myConsts->ic_bridgeBase + 0x20000000)
         {
             ppcmemSize -= 0x1000000;
         }
@@ -3400,7 +3413,8 @@ struct InitData* SetupMPC107(struct InternalConsts* myConsts, ULONG devfuncnum,
 
     if (myConsts->ic_pciType == VENDOR_E3B)
     {
-        if (memBase + mpc107Data->id_MemSize == myConsts->ic_gfxMem + 0x20000000)
+        /* the end of the board's 512 MB from its base, as SetupHarrier (17.15: ic_gfxMem, src_175/libinit.c:2218) */
+        if (memBase + mpc107Data->id_MemSize == myConsts->ic_bridgeBase + 0x20000000)
         {
             mpc107Data->id_MemSize -= 0x1000000;
             CacheClearU();

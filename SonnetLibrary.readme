@@ -200,6 +200,8 @@ What has changed since 17.16:
   (e.g. a Radeon): no more freeze when this library opens (tested on a PCI M1).
 - FireStorm with a Voodoo, a Radeon and a K1/M1 (PCI): new option AddRadeonMem
   adds the Radeon's memory as extra memory; PPC code runs from it at full speed.
+- FireStorm with a second graphics card below the Voodoo: the Harrier and MPC107
+  set-ups also use the board's base (tested on a Harrier and an MPC107 card).
 
 What has changed since 17.15:
 
