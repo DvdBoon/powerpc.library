@@ -191,6 +191,8 @@ What has changed since 17.16:
 - K1/M1 with a Voodoo card on a FireStorm: the warning at start-up is gone.
 - Harrier with 128MB and a Voodoo card on a FireStorm: no more freeze at the
   first start after switching on.
+- FireStorm with a second graphics card at a lower PCI address than the Voodoo
+  (e.g. a Radeon): no more freeze when this library opens (tested on a PCI M1).
 
 What has changed since 17.15:
 

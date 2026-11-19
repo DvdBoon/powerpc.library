@@ -522,6 +522,20 @@ __entry struct PPCBase *LibInit(__reg("d0") struct PPCBase *ppcbase,
         }
 
         offset = (ULONG)cd->cd_BoardAddr;
+
+        /*
+         * THE BOARD'S BASE, KEPT FOR THE CARD SET-UPS (19 Nov 2026, the user: "go, bridgebase").
+         * prometheus.library gives every card the Amiga address cd_BoardAddr + PCI address
+         * (PromLib driver_2.c:1035), and it hands PCI addresses out from 0 upward with the
+         * graphics card it finds first at the bottom (driver_2.c:680-683, 1176). The set-ups of the
+         * K1/M1, the PCIe M1, the Harrier and the MPC107 took the graphics card's Amiga address as
+         * that base, so with a Radeon at PCI 0 and the Voodoo at 0x0A000000 every PCI address they
+         * wrote came out 0x0A000000 too low (the K1/M1's RAM window inside the Radeon's memory,
+         * the Amiga frozen at the first write to the card's RAM). With the graphics card at 0 both
+         * are the same value. NO COUNTERPART in 17.13b, which knows only the Mediator
+         * (powerpc.s:150-226).
+         */
+        myConsts->ic_bridgeBase = offset;
     }
 
     else if ((FindConfigDev(NULL, VENDOR_ELBOX, MEDIATOR_MKII)) || (FindConfigDev(NULL, VENDOR_ELBOX, MEDIATOR_MKIII)))
@@ -1998,9 +2012,9 @@ struct InitData* SetupPKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
 
     Prm_GetBoardAttrsTagList(pppcdevice, (struct TagItem*)&cfgTags);
 
-    offset       = myConsts->ic_gfxMem;
+    offset       = myConsts->ic_bridgeBase;
     startAddress = offset + OFFSET_PCIMEM;
-    vgamemBase   = 0; //vga memory alsways sits at PCI address 0x0 for Prm
+    vgamemBase   = 0; //PCI address 0 is the board's base, ic_bridgeBase
 
     D(("Setting up %08lx of PPC memory at %08lx\n", memsize, ppcmemBase));
 
@@ -2282,10 +2296,10 @@ struct InitData* SetupKiller(struct InternalConsts* myConsts, ULONG devfuncnum,
 
         Prm_GetBoardAttrsTagList(pppcdevice, (struct TagItem*)&cfgTags);
 
-        offset       = myConsts->ic_gfxMem;
+        offset       = myConsts->ic_bridgeBase;
         startAddress = offset + OFFSET_PCIMEM;
         ppcmBx       = ppcmemBase - offset;
-        vgamemBase   = 0; //vga memory alsways sits at PCI address 0x0 for Prm
+        vgamemBase   = 0; //PCI address 0 is the board's base, ic_bridgeBase
     }
 
     D(("Setting up %08lx of PPC memory at %08lx\n", memsize, ppcmemBase));
@@ -2748,7 +2762,7 @@ struct InitData* SetupHarrier(struct InternalConsts* myConsts, ULONG devfuncnum,
         };
 
         Prm_GetBoardAttrsTagList(pppcdevice, (struct TagItem*)&cfgTags);
-        offset = myConsts->ic_gfxMem;
+        offset = myConsts->ic_bridgeBase;
     }
     else
     {
@@ -3023,7 +3037,7 @@ struct InitData* SetupMPC107(struct InternalConsts* myConsts, ULONG devfuncnum,
         };
 
         Prm_GetBoardAttrsTagList(pppcdevice, (struct TagItem*)&cfgTags);
-        offset = myConsts->ic_gfxMem;
+        offset = myConsts->ic_bridgeBase;
 
 #if 0
         if (!(romMem = (ULONG)Prm_AllocDMABuffer(0x20000)))

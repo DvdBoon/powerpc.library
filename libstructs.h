@@ -128,6 +128,7 @@ UWORD                   ic_gfxType;
 UWORD                   ic_gfxSubType;
 UWORD                   ic_pciType;
 UWORD                   ic_ErrShown;    /* L2: PrintCrtErr has shown its requester and run CleanUp */
+ULONG                   ic_bridgeBase;  /* FireStorm: the Amiga address of PCI address 0 (libinit.c) */
 };
 
 struct InitData {
